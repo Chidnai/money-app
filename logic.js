@@ -297,15 +297,22 @@ export function validateSettings(s) {
 }
 
 // ---- CP8/CP9 recurring (fixed + installment)
-// item: { id, name, categoryId, dueDay, mode:'fixed'|'installment', amount, schedule:{'YYYY-MM':satang}, startMonth, autoPay }
+// item: { id, name, categoryId, dueDay, mode:'fixed'|'installment', amount, schedule:{'YYYY-MM' (รอบบิล):satang}, startMonth (รอบบิลแรก) }
 export function recurringAmount(item, month) {
   if (month < item.startMonth) return 0;
   if (item.mode === 'installment') return item.schedule?.[month] || 0;
   return item.amount || 0;
 }
-export function dueDate(item, month) {
-  const [y, m] = month.split('-').map(Number);
-  return isoOf(y, m, Math.min(item.dueDay, daysIn(y, m)));
+/** Bill cycle: schedule month = รอบบิล (salary month that pays the bill).
+ *  Due day before payDay → paid in the next calendar month; otherwise in the same month. Weekends are not shifted. */
+export function dueDate(item, billMonth, s = DEFAULT_SETTINGS) {
+  const m = item.dueDay < s.payDay ? shiftMonth(billMonth, 1) : billMonth;
+  const [y, mm] = m.split('-').map(Number);
+  return isoOf(y, mm, Math.min(item.dueDay, daysIn(y, mm)));
+}
+/** Pay cycle of a salary month: payDate(M) .. day before payDate(M+1). */
+export function payCycle(month, s = DEFAULT_SETTINGS) {
+  return { start: payDate(month, s), end: addDays(payDate(shiftMonth(month, 1), s), -1) };
 }
 export function installmentEnd(item) {
   const ms = Object.keys(item.schedule || {}).filter((k) => item.schedule[k] > 0).sort();
@@ -327,31 +334,16 @@ export function validateRecurring(it, categories = []) {
   return null;
 }
 
-/** Status of each recurring item for `month`: amount, due, paid tx (if any), warn state relative to `today`. */
-export function recurringStatus(items, txs, month, today, warnDays = 3) {
+/** Status of each recurring item for bill month `month`: amount, actual due date, paid tx (if any), warn state relative to `today`. */
+export function recurringStatus(items, txs, month, today, warnDays = 3, s = DEFAULT_SETTINGS) {
   return items.map((it) => {
     const amount = recurringAmount(it, month);
-    const due = dueDate(it, month);
+    const due = dueDate(it, month, s);
     const paidTx = txs.find((t) => t.recurringId === it.id && t.recurringMonth === month) || null;
     const daysLeft = Math.round((Date.parse(due) - Date.parse(today)) / 864e5);
     const state = !amount ? 'none' : paidTx ? 'paid' : daysLeft < 0 ? 'overdue' : daysLeft <= warnDays ? 'soon' : 'upcoming';
     return { item: it, amount, due, paidTx, daysLeft, state };
   }).filter((r) => r.amount > 0 || r.paidTx);
-}
-
-/** Auto-pay: transactions to create for items with autoPay whose due date ≤ today and not yet paid (from startMonth to today's month). */
-export function autoPayDue(items, txs, today) {
-  const out = [], cur = monthKey(today);
-  for (const it of items) {
-    if (!it.autoPay) continue;
-    for (let m = it.startMonth; m <= cur; m = shiftMonth(m, 1)) {
-      const amount = recurringAmount(it, m), due = dueDate(it, m);
-      if (!amount || due > today) continue;
-      if (txs.some((t) => t.recurringId === it.id && t.recurringMonth === m)) continue;
-      out.push({ kind: 'out', amount, date: due, categoryId: it.categoryId, note: it.name, source: 'auto', recurringId: it.id, recurringMonth: m });
-    }
-  }
-  return out;
 }
 
 // ---- CP10 income plan
@@ -373,7 +365,7 @@ export function incomePlan({ month, plans, links = {}, txs, items, hours, settin
   const actTotal = sum(() => true);
   const fixedTotal = items.reduce((a, it) => a + recurringAmount(it, month), 0);
   return {
-    month, payDate: payDate(month, settings), salary, other, ot, planTotal, fixedTotal,
+    month, payDate: payDate(month, settings), cycle: payCycle(month, settings), salary, other, ot, planTotal, fixedTotal,
     remaining: planTotal - fixedTotal,
     actual: { salary: actSalary, ot: actOt, other: actTotal - actSalary - actOt, total: actTotal },
     toCome: Math.max(0, planTotal - actTotal),

@@ -1,6 +1,6 @@
 // Offline support. Bump VERSION on every release.
 // App files: network-first (always fresh when online, cache when offline) so an update never mixes old/new files.
-const VERSION = 'v8';
+const VERSION = 'v9';
 const SHELL = ['./', 'index.html', 'app.css', 'app.js', 'db.js', 'logic.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', (e) => e.waitUntil(

@@ -208,7 +208,7 @@ export class Repo {
     const cats = await this.listCategories();
     const it = { id: input.id || newId(), name: nn(input.name), categoryId: input.categoryId, dueDay: input.dueDay, mode: input.mode,
       amount: input.mode === 'fixed' ? input.amount : null, schedule: input.mode === 'installment' ? input.schedule : {},
-      startMonth: input.startMonth, autoPay: !!input.autoPay, createdAt: input.createdAt || Date.now() };
+      startMonth: input.startMonth, createdAt: input.createdAt || Date.now() };
     const err = validateRecurring(it, cats);
     if (err) throw new Error(err);
     await req(this.store('recurring', 'readwrite').put(it));

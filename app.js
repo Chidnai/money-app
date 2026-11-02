@@ -3,7 +3,7 @@ import { openDB, Repo } from './db.js';
 import {
   parseAmount, formatBaht, monthKey, shiftMonth, todayISO, monthLabel, dayLabel, summarize, groupByDate,
   budgetStatus, outstandingDebts, monthlySeries, effectiveBudget, pairNet, TIER_LABEL, MOVE_LABEL, backupFileName, checkBackup,
-  payDate, otPay, otCycle, dowLabel, addDays, isHolidayLike, recurringStatus, recurringAmount, autoPayDue, installmentEnd, incomePlan,
+  payDate, otPay, otCycle, dowLabel, addDays, isHolidayLike, recurringStatus, recurringAmount, installmentEnd, incomePlan, dueDate,
 } from './logic.js';
 
 const $ = (id) => document.getElementById(id);
@@ -48,16 +48,10 @@ async function render() {
 const dLabel = (iso) => `${dowLabel(iso)} ${dayLabel(iso)}`;
 const bahtIn = (v) => (v === '' || v == null ? null : parseAmount(String(v)));
 const numIn = (v) => (String(v).trim() === '' ? NaN : Number(String(v).replace(/,/g, '')));
-async function runAutoPay() {
-  const [items, txs] = await Promise.all([repo.listRecurring(), repo.listTransactions()]);
-  const todo = autoPayDue(items, txs, todayISO());
-  for (const t of todo) { try { await repo.saveTransaction(t); } catch { /* category removed etc. */ } }
-  if (todo.length) toast(`หักรายจ่ายประจำอัตโนมัติ ${todo.length} รายการ`);
-}
 async function renderDue(el, compact) {
   const today = todayISO(), m = monthKey(today);
   const [items, txs, st] = await Promise.all([repo.listRecurring(), repo.listTransactions(), repo.getSettings()]);
-  const rows = [...recurringStatus(items, txs, shiftMonth(m, -1), today, st.dueWarnDays), ...recurringStatus(items, txs, m, today, st.dueWarnDays)]
+  const rows = [-2, -1, 0].flatMap((i) => recurringStatus(items, txs, shiftMonth(m, i), today, st.dueWarnDays, st))
     .filter((r) => r.state === 'soon' || r.state === 'overdue');
   if (!rows.length) { el.innerHTML = ''; return; }
   const over = rows.some((r) => r.state === 'overdue');
@@ -86,9 +80,10 @@ async function planCtx() {
 async function renderPlan() {
   const ctx = await planCtx();
   const p = incomePlan({ month: S.month, ...ctx });
-  $('pl-sum').innerHTML = `<div class="lbl">คงเหลือตามแผน ${monthLabel(S.month)} (รายรับตามแผน − รายจ่ายประจำ)</div>
+  $('pl-sum').innerHTML = `<div class="lbl">รอบเงินเดือน ${monthLabel(S.month).split(' ')[0]} · ${dayLabel(p.cycle.start)} – ${dayLabel(p.cycle.end)}</div>
     <div class="big num">฿ ${p.remaining < 0 ? '−' : ''}${formatBaht(Math.abs(p.remaining))}</div>
-    <div class="grid"><div>รายรับตามแผน<b class="num">${formatBaht(p.planTotal)}</b></div><div>รายจ่ายประจำ<b class="num">${formatBaht(p.fixedTotal)}</b></div><div>เงินออก<b>${dLabel(p.payDate)}</b></div></div>`;
+    <div class="lbl">เหลือไว้ใช้ระหว่างรอบ (รายรับรอบ ${monthLabel(S.month).split(' ')[0]} − บิลรอบ ${monthLabel(S.month).split(' ')[0]})</div>
+    <div class="grid"><div>รายรับตามแผน<b class="num">${formatBaht(p.planTotal)}</b></div><div>บิลรอบนี้<b class="num">${formatBaht(p.fixedTotal)}</b></div><div>เงินออก<b>${dLabel(p.payDate)}</b></div></div>`;
   const cyc = otCycle(S.month, ctx.settings);
   const got = (v) => (v > 0 ? `<span style="color:var(--ok)">ได้รับแล้ว ${formatBaht(v)} ✓</span> · ` : '');
   $('pl-lines').innerHTML = `<div class="row"><h2>รายรับ: แผน vs จริง</h2></div>
@@ -111,7 +106,8 @@ async function renderPlan() {
     <tr><td>รายจ่ายประจำ/ผ่อน</td>${months.map((x) => td(fm(x.fixedTotal))).join('')}</tr>
     <tr><td><b>คงเหลือ</b></td>${months.map((x) => td(fm(x.remaining), true)).join('')}</tr>
     <tr class="muted"><td>เงินออก</td>${months.map((x) => td(`${dowLabel(x.payDate)} ${Number(x.payDate.slice(8))}`)).join('')}</tr></table>
-    ${months.slice(1).some((x) => !x.ot.hours) ? '<p class="muted" style="margin:6px 0 0">เดือนที่ยังไม่กรอกปฏิทิน OT จะนับ OT = 0</p>' : ''}`;
+    <p class="muted" style="margin:6px 0 0">รายจ่ายประจำ/ผ่อนของแต่ละเดือน = บิลรอบนั้น ที่จ่ายจริงหลังเงินออก ด้วยเงินเดือนเดือนนั้น</p>
+    ${months.slice(1).some((x) => !x.ot.hours) ? '<p class="muted" style="margin:4px 0 0">เดือนที่ยังไม่กรอกปฏิทิน OT จะนับ OT = 0</p>' : ''}`;
 }
 
 // ---------- CP11 OT calendar
@@ -147,18 +143,19 @@ async function renderOt() {
 
 // ---------- CP8/CP9 recurring
 async function renderFix() {
-  await runAutoPay();
   await renderDue($('fx-warn'), false);
-  const [items, txs] = await Promise.all([repo.listRecurring(), repo.listTransactions()]);
-  const st = recurringStatus(items, txs, S.month, todayISO(), (await repo.getSettings()).dueWarnDays);
+  const [items, txs, set] = await Promise.all([repo.listRecurring(), repo.listTransactions(), repo.getSettings()]);
+  const st = recurringStatus(items, txs, S.month, todayISO(), set.dueWarnDays, set);
+  const cyc = incomePlan({ month: S.month, plans: [], txs: [], items: [], hours: {}, settings: set }).cycle;
+  $('fx-head').textContent = `รอบบิล ${monthLabel(S.month).split(' ')[0]} → จ่ายจริง ${dayLabel(cyc.start)} – ${dayLabel(cyc.end)}`;
   const byId = Object.fromEntries(st.map((r) => [r.item.id, r]));
   $('fx-list').innerHTML = items.length ? items.map((it) => {
     const r = byId[it.id];
     const end = it.mode === 'installment' ? installmentEnd(it) : null;
-    const sub = `ทุกวันที่ ${it.dueDay} · ${it.mode === 'fixed' ? 'คงที่' : `ผ่อน${end ? ' ถึง ' + monthLabel(end) : ''}`}${it.autoPay ? ' · หักอัตโนมัติ' : ''}`;
-    let right = '<span class="muted">ไม่มียอดเดือนนี้</span>';
+    const sub = `${r ? `จ่าย ${dLabel(r.due)}` : `ทุกวันที่ ${it.dueDay}`} · ${it.mode === 'fixed' ? 'คงที่' : `ผ่อน${end ? ' ถึงรอบ ' + monthLabel(end) : ''}`}`;
+    let right = '<span class="muted">ไม่มียอดรอบนี้</span>';
     if (r) {
-      const tag = r.state === 'paid' ? `<span class="tag" style="color:var(--ok);border-color:var(--ok)">${r.paidTx.source === 'auto' ? 'หักอัตโนมัติแล้ว' : 'จ่ายแล้ว'}</span>`
+      const tag = r.state === 'paid' ? `<span class="tag" style="color:var(--ok);border-color:var(--ok)">จ่ายแล้ว</span>`
         : r.state === 'overdue' ? `<button class="icon-btn" data-pay="${it.id}" style="color:var(--over);border-color:var(--over)">เลยกำหนด · รอจ่าย</button>`
         : r.state === 'soon' ? `<button class="icon-btn" data-pay="${it.id}" style="color:var(--alert);border-color:var(--alert)">รอจ่าย</button>`
         : `<button class="icon-btn" data-pay="${it.id}">รอจ่าย</button>`;
@@ -169,11 +166,14 @@ async function renderFix() {
   }).join('') : '<div class="empty"><b>ยังไม่มีรายจ่ายประจำ</b><span>เพิ่มค่ารถ ค่าเน็ต หรือรายการผ่อน</span></div>';
 }
 
-function schedInputs(it) {
-  const start = $('fx-start').value || S.month, out = [];
+async function schedInputs(it) {
+  const start = $('fx-start').value || S.month, out = [], set = await repo.getSettings();
+  const day = Number($('fx-day').value);
+  const keep = Object.fromEntries([...document.querySelectorAll('#fx-sched input[data-sm]')].map((i) => [i.dataset.sm, i.value]));
   for (let i = 0; i < 12; i++) {
-    const m = shiftMonth(start, i), v = it?.schedule?.[m];
-    out.push(`<label style="font-size:12px">${monthLabel(m)}<input class="num" data-sm="${m}" inputmode="decimal" value="${v ? v / 100 : ''}" placeholder="0" aria-label="ยอดผ่อน ${monthLabel(m)}"></label>`);
+    const m = shiftMonth(start, i), v = keep[m] ?? (it?.schedule?.[m] ? it.schedule[m] / 100 : '');
+    const pay = day >= 1 && day <= 31 ? ` → จ่าย ${dayLabel(dueDate({ dueDay: day }, m, set))}` : '';
+    out.push(`<label style="font-size:12px">รอบ ${monthLabel(m).split(' ')[0]}${pay}<input class="num" data-sm="${m}" inputmode="decimal" value="${v}" placeholder="0" aria-label="ยอดผ่อนรอบ ${monthLabel(m)}"></label>`);
   }
   $('fx-sched').innerHTML = out.join('');
 }
@@ -190,8 +190,9 @@ async function openFxForm(id) {
   $('fx-title').textContent = it ? `แก้ไข: ${it.name}` : 'เพิ่มรายจ่ายประจำ';
   $('fx-name').value = it?.name || ''; $('fx-cat').value = it?.categoryId || '';
   $('fx-day').value = it?.dueDay || ''; $('fx-start').value = it?.startMonth || S.month;
-  $('fx-amt').value = it?.amount ? it.amount / 100 : ''; $('fx-auto').checked = it ? it.autoPay : true;
-  setFxMode(it?.mode || 'fixed'); schedInputs(it);
+  $('fx-amt').value = it?.amount ? it.amount / 100 : '';
+  $('fx-sched').innerHTML = '';
+  setFxMode(it?.mode || 'fixed'); await schedInputs(it);
   $('fx-del').hidden = !it; $('fx-delok').hidden = true; $('fx-err').textContent = '';
   $('fx-form').hidden = false; $('fx-form').scrollIntoView({ block: 'start' });
 }
@@ -251,7 +252,6 @@ const sign = (n) => (n > 0 ? '+' : n < 0 ? '−' : '') + formatBaht(Math.abs(n))
 
 // ---------- HOME (CP5–CP7)
 async function renderHome() {
-  await runAutoPay();
   await renderDue($('home-due'), true);
   const [allTx, budgets, moves] = await Promise.all([repo.listTransactions(), repo.listBudgets(), repo.listMoves()]);
   const s = summarize(allTx.filter((t) => monthKey(t.date) === S.month));
@@ -476,11 +476,12 @@ function bind() {
       else if (S.editing?._t === 'mv' && S.kind !== 'move') await repo.convertMoveToTx(S.editing, txIn);
       else if (S.kind === 'move') await repo.saveMove({ ...base, ...mvIn });
       else await repo.saveTransaction({ ...base, ...txIn });
-      const wasEdit = !!S.editing, wasMove = S.kind === 'move';
-      S.month = monthKey($('f-date').value);
+      const wasEdit = !!S.editing, wasMove = S.kind === 'move', bill = !wasEdit && S.recLink;
+      S.month = bill ? S.recLink.recurringMonth : monthKey($('f-date').value);
       resetForm();
       toast(wasEdit ? 'บันทึกการแก้ไขแล้ว' : 'บันทึกแล้ว');
       if (wasMove && !wasEdit) S.kind = 'out';
+      if (bill) { S.sub = 'fix'; go('more'); return; } // back to the same bill cycle
       go(wasEdit ? 'list' : wasMove ? 'home' : 'add');
     } catch (err) { $('f-err').textContent = err.message; }
   });
@@ -523,11 +524,12 @@ function bind() {
     resetForm();
     S.kind = 'out'; S.catId = it.categoryId; S.recLink = { recurringId: it.id, recurringMonth: S.month };
     $('f-amt').value = recurringAmount(it, S.month) / 100; $('f-note').value = it.name;
-    const today = todayISO(); $('f-date').value = monthKey(today) === S.month ? today : `${S.month}-${String(Math.min(it.dueDay, 28)).padStart(2, '0')}`;
+    $('f-date').value = todayISO();
     go('add'); toast(`เติมข้อมูล "${it.name}" ให้แล้ว แนบสลิปได้ แล้วกดบันทึก`);
   });
   $('fx-mode').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) setFxMode(b.dataset.m); });
-  $('fx-start').addEventListener('change', () => schedInputs(S.fxEdit));
+  $('fx-start').addEventListener('change', () => { $('fx-sched').innerHTML = ''; schedInputs(S.fxEdit); });
+  $('fx-day').addEventListener('change', () => schedInputs(S.fxEdit));
   $('fx-cancel').onclick = () => { $('fx-form').hidden = true; S.fxEdit = null; };
   $('fx-del').onclick = () => { $('fx-del').hidden = true; $('fx-delok').hidden = false; };
   $('fx-delok').onclick = async () => { await repo.deleteRecurring(S.fxEdit.id); $('fx-form').hidden = true; S.fxEdit = null; toast('ลบแล้ว (รายการที่จ่ายไปแล้วยังอยู่)'); renderFix(); };
@@ -541,7 +543,7 @@ function bind() {
     }
     try {
       await repo.saveRecurring({ ...(S.fxEdit || {}), name: $('fx-name').value, categoryId: $('fx-cat').value, dueDay: numIn($('fx-day').value),
-        startMonth: $('fx-start').value, mode: S.fxMode, amount: S.fxMode === 'fixed' ? bahtIn($('fx-amt').value) : null, schedule, autoPay: $('fx-auto').checked });
+        startMonth: $('fx-start').value, mode: S.fxMode, amount: S.fxMode === 'fixed' ? bahtIn($('fx-amt').value) : null, schedule });
       $('fx-form').hidden = true; S.fxEdit = null; toast('บันทึกแล้ว'); renderFix();
     } catch (err) { $('fx-err').textContent = err.message; }
   });
