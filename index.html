@@ -53,7 +53,9 @@
 <section data-v="add" class="view" hidden>
   <form class="form" id="txform" novalidate>
     <div class="seg" id="kind" style="grid-template-columns:repeat(3,1fr)"><button type="button" class="on" data-k="out">รายจ่าย</button><button type="button" data-k="in">รายรับ</button><button type="button" data-k="move">ยืม-คืน</button></div>
-    <div class="slip" role="button" tabindex="0" id="slip"><b>อัพโหลดสลิปโอนเงิน</b><span style="font-size:13px">ไม่บังคับ · ไม่มีสลิปก็กรอกเองได้</span></div>
+    <label class="slip" for="slip-file" id="slip"><b>อัพโหลดสลิปโอนเงิน</b><span style="font-size:13px" id="slip-msg">ไม่บังคับ · ไม่มีสลิปก็กรอกเองได้</span></label>
+    <input type="file" id="slip-file" accept="image/*" hidden>
+    <div id="slip-match" hidden class="panel" style="display:grid;gap:8px;border-color:var(--ok)"></div>
     <div class="muted" style="text-align:center">หรือกรอกเอง</div>
     <label for="f-amt">จำนวนเงิน (บาท)<input id="f-amt" class="amount-in num" inputmode="decimal" autocomplete="off" placeholder="0.00"></label>
     <label for="f-date">วันที่<input id="f-date" type="date"></label>

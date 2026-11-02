@@ -2,7 +2,7 @@
 import { openDB, Repo } from './db.js';
 import {
   parseAmount, formatBaht, monthKey, shiftMonth, todayISO, monthLabel, dayLabel, summarize, groupByDate,
-  budgetStatus, outstandingDebts, monthlySeries, effectiveBudget, pairNet, TIER_LABEL, MOVE_LABEL, backupFileName, checkBackup,
+  budgetStatus, outstandingDebts, monthlySeries, effectiveBudget, pairNet, TIER_LABEL, MOVE_LABEL, backupFileName, checkBackup, parseSlipText, matchBills,
   payDate, otPay, otCycle, dowLabel, addDays, isHolidayLike, recurringStatus, recurringAmount, installmentEnd, incomePlan, dueDate,
 } from './logic.js';
 
@@ -209,6 +209,47 @@ async function renderSettings() {
   $('st-err').textContent = '';
 }
 
+// ---------- CP4 slip OCR (on-device; image is not stored)
+let ocrWorker = null;
+function loadScript(src) { return new Promise((res, rej) => { const el = document.createElement('script'); el.src = src; el.onload = res; el.onerror = () => rej(new Error('โหลดตัวอ่านสลิปไม่ได้ (ครั้งแรกต้องต่อเน็ต)')); document.head.appendChild(el); }); }
+async function getOcr() {
+  if (ocrWorker) return ocrWorker;
+  if (!window.Tesseract) await loadScript('tesseract.min.js');
+  const base = new URL('./', location.href).href; // OCR files sit next to index.html (easy upload, no folders)
+  ocrWorker = await Tesseract.createWorker('tha+eng', 1, { workerPath: base + 'worker.min.js', corePath: base, langPath: base.replace(/\/$/, ''), gzip: true });
+  return ocrWorker;
+}
+async function shrink(file) {
+  const bmp = await createImageBitmap(file);
+  const k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height); bmp.close?.();
+  return c;
+}
+async function readSlip(file) {
+  const msg = $('slip-msg'); $('slip-match').hidden = true;
+  msg.textContent = ocrWorker ? 'กำลังอ่านสลิป…' : 'กำลังอ่านสลิป… (ครั้งแรกโหลดตัวอ่านประมาณ 8 MB)';
+  try {
+    const w = await getOcr();
+    const { data } = await w.recognize(await shrink(file));
+    const r = parseSlipText(data.text || '');
+    S.fromSlip = true;
+    if (r.amount) $('f-amt').value = (r.amount / 100).toFixed(2);
+    if (r.date) $('f-date').value = r.date;
+    const got = [r.amount ? `ยอด ${formatBaht(r.amount, { decimals: 2 })}` : null, r.date ? `วันที่ ${dayLabel(r.date)}` : null].filter(Boolean);
+    msg.textContent = got.length ? `อ่านได้: ${got.join(' · ')}${got.length < 2 ? ' · ช่องที่เหลือกรอกเอง' : ''} — ตรวจก่อนบันทึก` : 'อ่านยอด/วันที่ไม่ได้ กรอกเองได้เลย';
+    if (r.amount && !S.editing && S.kind !== 'in') {
+      const [items, txs, st] = await Promise.all([repo.listRecurring(), repo.listTransactions(), repo.getSettings()]);
+      const hits = matchBills(items, txs, r.amount, todayISO(), st);
+      if (hits.length && !S.recLink) {
+        $('slip-match').innerHTML = `<b>ยอดตรงกับบิลที่รอจ่าย</b>` + hits.slice(0, 3).map((h) =>
+          `<button type="button" class="btn small ghost" data-match="${h.item.id}|${h.billMonth}|${h.item.categoryId}|${esc(h.item.name)}">${esc(h.item.name)} รอบ ${monthLabel(h.billMonth).split(' ')[0]} (จ่าย ${dayLabel(h.due)}) — ผูกเป็นจ่ายแล้ว</button>`).join('');
+        $('slip-match').hidden = false;
+      }
+    }
+  } catch (err) { msg.textContent = 'อ่านสลิปไม่สำเร็จ: ' + (err.message || err) + ' — กรอกเองได้'; }
+}
+
 // ---------- BACKUP (CP12)
 const fmtStamp = (iso) => { const d = new Date(iso); return isNaN(d) ? '—' : `${d.getDate()} ${TH_SHORT[d.getMonth()]} ${String(d.getFullYear() + 543).slice(2)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 const countText = (c) => `หมวด ${c.categories} · รายการ ${c.transactions} · ยืม-คืน ${c.moves} · งบ ${c.budgetMonths} เดือน · ประจำ ${c.recurring || 0}`;
@@ -335,7 +376,7 @@ async function renderList() {
   };
   let items = [...txs0.map((t) => ({ ...t, _t: 'tx' })), ...mv0.map((m) => ({ ...m, _t: 'mv' }))];
   if (f.value) items = items.filter((t) => t.categoryId === f.value || t.fromId === f.value || t.toId === f.value);
-  const src = (s) => `<span class="tag">${s && s !== 'manual' ? esc(s) : 'กรอกเอง'}</span>`;
+  const src = (s) => `<span class="tag">${s === 'slip' ? 'สลิป' : s === 'auto' ? 'อัตโนมัติ (เดิม)' : s && s !== 'manual' ? esc(s) : 'กรอกเอง'}</span>`;
   $('txlist').innerHTML = items.length ? groupByDate(items).map((g) => `<div class="day">${dayLabel(g.date)}</div>` + g.items.map((t) => {
     if (t._t === 'mv') {
       const verb = t.type === 'borrow' ? `ยืม ${esc(catName(t.fromId))}` : t.type === 'repay' ? `คืน ${esc(catName(t.toId))}` : `ย้ายงบ → ${esc(catName(t.toId))}`;
@@ -383,7 +424,8 @@ function renderMoveFields(pre = {}) {
 }
 
 function resetForm() {
-  S.editing = null; S.catId = null; S.recLink = null;
+  S.editing = null; S.catId = null; S.recLink = null; S.fromSlip = false;
+  if ($('slip-msg')) { $('slip-msg').textContent = 'ไม่บังคับ · ไม่มีสลิปก็กรอกเองได้'; $('slip-match').hidden = true; }
   $('f-amt').value = ''; $('f-note').value = ''; $('f-date').value = todayISO(); $('f-err').textContent = '';
   $('m-from').value = ''; $('m-to').value = '';
 }
@@ -462,13 +504,21 @@ function bind() {
     if (e.target.id === 'go-cat') { e.preventDefault(); S.catKind = S.kind; return go('cat'); }
     const b = e.target.closest('.chip'); if (!b) return; S.catId = b.dataset.id; renderChips();
   });
-  $('slip').addEventListener('click', () => toast('อ่านสลิปอัตโนมัติจะเปิดใช้ใน CP4'));
+  $('slip-file').onchange = (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) readSlip(f); };
+  $('slip-match').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-match]'); if (!b) return;
+    const [id, bm, cat, name] = b.dataset.match.split('|');
+    S.kind = 'out'; S.catId = cat; S.recLink = { recurringId: id, recurringMonth: bm };
+    if (!$('f-note').value) $('f-note').value = name;
+    $('slip-match').innerHTML = `<b style="color:var(--ok)">ผูกกับบิล "${esc(name)}" รอบ ${monthLabel(bm).split(' ')[0]} แล้ว · กดบันทึกเพื่อยืนยัน</b>`;
+    renderForm();
+  });
   $('txform').addEventListener('submit', async (e) => {
     e.preventDefault();
     const amount = parseAmount($('f-amt').value);
     if (amount === null) return ($('f-err').textContent = 'จำนวนเงินไม่ถูกต้อง (ตัวเลข ทศนิยมไม่เกิน 2 ตำแหน่ง)');
     const base = S.editing || {};
-    const common = { amount, date: $('f-date').value, note: $('f-note').value };
+    const common = { amount, date: $('f-date').value, note: $('f-note').value, ...(S.fromSlip && !S.editing ? { source: 'slip' } : {}) };
     try {
       const mvIn = { ...common, type: S.mtype, fromId: $('m-from').value, toId: $('m-to').value };
       const txIn = { ...common, kind: S.kind, categoryId: S.catId, ...(S.recLink && !S.editing ? S.recLink : {}) };

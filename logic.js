@@ -371,3 +371,63 @@ export function incomePlan({ month, plans, links = {}, txs, items, hours, settin
     toCome: Math.max(0, planTotal - actTotal),
   };
 }
+
+// ---------------- CP4 slip OCR parsing ----------------
+const TH_MON = [['ม.ค', 'มกราคม'], ['ก.พ', 'กุมภาพันธ์'], ['มี.ค', 'มีนาคม'], ['เม.ย', 'เมษายน'], ['พ.ค', 'พฤษภาคม'], ['มิ.ย', 'มิถุนายน'],
+  ['ก.ค', 'กรกฎาคม'], ['ส.ค', 'สิงหาคม'], ['ก.ย', 'กันยายน'], ['ต.ค', 'ตุลาคม'], ['พ.ย', 'พฤศจิกายน'], ['ธ.ค', 'ธันวาคม']];
+const EN_MON = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+function toCE(y) {
+  if (y < 100) y += y >= 40 ? 2500 : 2000; // 2-digit: 69 → 2569 (BE); 26 → 2026 (CE)
+  if (y > 2400) y -= 543;
+  return y;
+}
+const okDate = (y, m, d) => (isValidISODate(`${y}-${pad(m)}-${pad(d)}`) ? `${y}-${pad(m)}-${pad(d)}` : null);
+
+/** Find a date in OCR text. Supports "2 พ.ย. 69", "02 พฤศจิกายน 2569", "2 Nov 2026", "02/11/2026", "02/11/69". */
+export function parseSlipDate(text) {
+  const t = String(text).replace(/[​ ]/g, ' ');
+  const compact = t.replace(/\s*\.\s*/g, '.'); // "พ. ย." → "พ.ย."
+  for (let i = 0; i < 12; i++) {
+    const [ab, full] = TH_MON[i];
+    const abRe = ab.replace(/\./g, '\\.?');
+    const re = new RegExp(`(\\d{1,2})\\s*(?:${full}|${abRe}\\.?)\\s*(\\d{2,4})`);
+    const m = compact.match(re);
+    if (m) { const r = okDate(toCE(+m[2]), i + 1, +m[1]); if (r) return r; }
+  }
+  const en = t.match(/(\d{1,2})[\s-]*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?[\s-]*(\d{2,4})/i);
+  if (en) { const r = okDate(toCE(+en[3]), EN_MON.indexOf(en[2].toLowerCase()) + 1, +en[1]); if (r) return r; }
+  const num = t.match(/(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})/);
+  if (num) { const r = okDate(toCE(+num[3]), +num[2], +num[1]); if (r) return r; }
+  return null;
+}
+
+/** Find the transfer amount (satang). Prefers a money value on/after a keyword line; ignores fees. */
+export function parseSlipAmount(text) {
+  const lines = String(text).split(/\r?\n/).map((l) => l.replace(/[Oo](?=[\d,.]*\d)/g, '0'));
+  const money = /(\d{1,3}(?:[,\s]\d{3})*|\d+)[.,](\d{2})(?!\d)/g;
+  const vals = (l) => [...l.matchAll(money)].map((m) => Number(m[1].replace(/[,\s]/g, '')) * 100 + Number(m[2]));
+  const KEY = /(จำนวนเงิน|จำนวน|ยอดเงิน|ยอดโอน|ยอดชำระ|amount|total)/i, FEE = /(ค่าธรรมเนียม|fee|คงเหลือ|balance)/i;
+  for (let i = 0; i < lines.length; i++) {
+    if (!KEY.test(lines[i]) || FEE.test(lines[i])) continue;
+    for (const l of [lines[i], lines[i + 1] || '', lines[i + 2] || '']) {
+      if (FEE.test(l) && l !== lines[i]) continue;
+      const v = vals(l).filter((x) => x > 0);
+      if (v.length) return v[0];
+    }
+  }
+  const all = lines.filter((l) => !FEE.test(l)).flatMap(vals).filter((x) => x > 0);
+  return all.length ? Math.max(...all) : null;
+}
+
+export function parseSlipText(text) {
+  return { amount: parseSlipAmount(text), date: parseSlipDate(text) };
+}
+
+/** Unpaid bills (bill months m-2..m of `today`) whose amount equals `amount`. */
+export function matchBills(items, txs, amount, today, s = DEFAULT_SETTINGS) {
+  if (!amount) return [];
+  const m = monthKey(today);
+  return [-2, -1, 0].flatMap((i) => recurringStatus(items, txs, shiftMonth(m, i), today, 3, s).map((r) => ({ ...r, billMonth: shiftMonth(m, i) })))
+    .filter((r) => r.state !== 'paid' && r.state !== 'none' && r.amount === amount);
+}
