@@ -205,3 +205,177 @@ export function monthlySeries(txs, endMonth, n = 6) {
   }
   return out;
 }
+
+// ---------------- CP12 backup ----------------
+export const BACKUP_FORMAT = 2;
+const STORES = ['categories', 'transactions', 'budgets', 'moves'];
+export const STORES_V3 = ['recurring', 'otHours', 'plans'];
+export const META_KEYS = ['settings', 'holidays', 'planLinks'];
+
+export function backupFileName(now = new Date()) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `money-backup-${now.getFullYear() + 543}-${p(now.getMonth() + 1)}-${p(now.getDate())}.json`;
+}
+
+// Returns { error } or { counts, exportedAt }
+export function checkBackup(obj) {
+  if (!obj || obj.app !== 'money-app' || typeof obj.data !== 'object') return { error: 'ไม่ใช่ไฟล์สำรองของแอพนี้' };
+  if (obj.format > BACKUP_FORMAT) return { error: 'ไฟล์มาจากแอพเวอร์ชันใหม่กว่า ให้อัปเดตแอพก่อน' };
+  for (const s of STORES) if (!Array.isArray(obj.data[s])) return { error: `ไฟล์ไม่สมบูรณ์ (ไม่มี ${s})` };
+  for (const s of STORES_V3) if (obj.data[s] !== undefined && !Array.isArray(obj.data[s])) return { error: `ไฟล์ไม่สมบูรณ์ (${s})` };
+  const d = obj.data;
+  const catIds = new Set(d.categories.map((c) => c.id));
+  if (d.categories.some((c) => !c.id || !KINDS.includes(c.kind) || !c.name)) return { error: 'ข้อมูลหมวดในไฟล์เสีย' };
+  if (d.transactions.some((t) => !t.id || !Number.isSafeInteger(t.amount) || !isValidISODate(t.date) || !catIds.has(t.categoryId))) return { error: 'ข้อมูลรายการในไฟล์เสีย' };
+  if (d.moves.some((m) => !m.id || !MOVE_TYPES.includes(m.type) || !Number.isSafeInteger(m.amount) || !catIds.has(m.fromId) || !catIds.has(m.toId))) return { error: 'ข้อมูลยืม-คืนในไฟล์เสีย' };
+  if (d.budgets.some((b) => !b.key || !/^\d{4}-\d{2}$/.test(b.month) || !catIds.has(b.categoryId))) return { error: 'ข้อมูลงบในไฟล์เสีย' };
+  return {
+    exportedAt: obj.exportedAt,
+    counts: { categories: d.categories.length, transactions: d.transactions.length, moves: d.moves.length, budgetMonths: new Set(d.budgets.map((b) => b.month)).size, recurring: (d.recurring || []).length },
+  };
+}
+
+// ---------------- ชุด 3: CP8–CP11 ----------------
+export const DEFAULT_SETTINGS = { baseRate: 13750, wdMul: 1.5, hdMul1: 1, hdHours: 8, hdMul2: 3, cycleStart: 16, payDay: 26, dueWarnDays: 3 };
+const TH_DOW = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
+const pad = (n) => String(n).padStart(2, '0');
+const daysIn = (y, m) => new Date(Date.UTC(y, m, 0)).getUTCDate();
+const isoOf = (y, m, d) => `${y}-${pad(m)}-${pad(d)}`;
+const dowOf = (iso) => { const [y, m, d] = iso.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d)).getUTCDay(); };
+export const dowLabel = (iso) => TH_DOW[dowOf(iso)];
+export function addDays(iso, n) {
+  const [y, m, d] = iso.split('-').map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d + n));
+  return isoOf(t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate());
+}
+
+// Pay date of a month: payDay (clipped); Sat → Fri, Sun → Fri
+export function payDate(month, s = DEFAULT_SETTINGS) {
+  const [y, m] = month.split('-').map(Number);
+  const iso = isoOf(y, m, Math.min(s.payDay, daysIn(y, m)));
+  const w = dowOf(iso);
+  return w === 6 ? addDays(iso, -1) : w === 0 ? addDays(iso, -2) : iso;
+}
+
+// OT cycle paid in `month`: (cycleStart of previous month) .. (cycleStart-1 of this month)
+export function otCycle(month, s = DEFAULT_SETTINGS) {
+  const prev = shiftMonth(month, -1);
+  const [py, pm] = prev.split('-').map(Number), [y, m] = month.split('-').map(Number);
+  return { start: isoOf(py, pm, Math.min(s.cycleStart, daysIn(py, pm))), end: addDays(isoOf(y, m, Math.min(s.cycleStart, daysIn(y, m))), -1) };
+}
+
+export const isHolidayLike = (iso, holidays = []) => { const w = dowOf(iso); return w === 0 || w === 6 || holidays.includes(iso); };
+
+// hours: { 'YYYY-MM-DD': number }. Returns satang totals.
+export function otPay(month, hours, s = DEFAULT_SETTINGS, holidays = []) {
+  const { start, end } = otCycle(month, s);
+  let wdH = 0, hd1H = 0, hd2H = 0;
+  for (let d = start; d <= end; d = addDays(d, 1)) {
+    const h = Number(hours[d] || 0);
+    if (!h) continue;
+    if (isHolidayLike(d, holidays)) { hd1H += Math.min(h, s.hdHours); hd2H += Math.max(0, h - s.hdHours); } else wdH += h;
+  }
+  const wd = Math.round(wdH * s.baseRate * s.wdMul), hd1 = Math.round(hd1H * s.baseRate * s.hdMul1), hd2 = Math.round(hd2H * s.baseRate * s.hdMul2);
+  return { start, end, wdH, hd1H, hd2H, wd, hd1, hd2, hours: wdH + hd1H + hd2H, total: wd + hd1 + hd2 };
+}
+
+export function validateOtHours(h) {
+  const n = Number(h);
+  if (!Number.isFinite(n) || n < 0 || n > 24) return 'ชั่วโมงต้องอยู่ระหว่าง 0–24';
+  if (Math.round(n * 4) !== n * 4) return 'ใส่ชั่วโมงทีละ 0.25 (15 นาที)';
+  return null;
+}
+
+export function validateSettings(s) {
+  if (!Number.isSafeInteger(s.baseRate) || s.baseRate <= 0) return 'อัตราฐานต้องมากกว่า 0';
+  for (const k of ['wdMul', 'hdMul1', 'hdMul2']) if (!(s[k] > 0 && s[k] <= 10)) return 'ตัวคูณต้องอยู่ระหว่าง 0–10';
+  if (!(s.hdHours >= 0 && s.hdHours <= 24)) return 'ชั่วโมงแรกของวันหยุดต้องอยู่ระหว่าง 0–24';
+  if (!(Number.isInteger(s.cycleStart) && s.cycleStart >= 1 && s.cycleStart <= 28)) return 'วันเริ่มรอบต้องเป็น 1–28';
+  if (!(Number.isInteger(s.payDay) && s.payDay >= 1 && s.payDay <= 31)) return 'วันเงินออกต้องเป็น 1–31';
+  if (!(Number.isInteger(s.dueWarnDays) && s.dueWarnDays >= 0 && s.dueWarnDays <= 15)) return 'วันเตือนต้องเป็น 0–15';
+  return null;
+}
+
+// ---- CP8/CP9 recurring (fixed + installment)
+// item: { id, name, categoryId, dueDay, mode:'fixed'|'installment', amount, schedule:{'YYYY-MM':satang}, startMonth, autoPay }
+export function recurringAmount(item, month) {
+  if (month < item.startMonth) return 0;
+  if (item.mode === 'installment') return item.schedule?.[month] || 0;
+  return item.amount || 0;
+}
+export function dueDate(item, month) {
+  const [y, m] = month.split('-').map(Number);
+  return isoOf(y, m, Math.min(item.dueDay, daysIn(y, m)));
+}
+export function installmentEnd(item) {
+  const ms = Object.keys(item.schedule || {}).filter((k) => item.schedule[k] > 0).sort();
+  return ms.length ? ms[ms.length - 1] : null;
+}
+export function validateRecurring(it, categories = []) {
+  if (!normalizeName(it.name)) return 'กรุณาใส่ชื่อ';
+  if (String(it.name).length > 40) return 'ชื่อยาวเกิน 40 ตัวอักษร';
+  const c = categories.find((x) => x.id === it.categoryId);
+  if (!c || c.kind !== 'out') return 'กรุณาเลือกหมวดรายจ่าย';
+  if (!(Number.isInteger(it.dueDay) && it.dueDay >= 1 && it.dueDay <= 31)) return 'วันครบกำหนดต้องเป็น 1–31';
+  if (!/^\d{4}-\d{2}$/.test(it.startMonth || '')) return 'เดือนเริ่มไม่ถูกต้อง';
+  if (it.mode === 'fixed') { if (!Number.isSafeInteger(it.amount) || it.amount <= 0) return 'จำนวนเงินต้องมากกว่า 0'; }
+  else if (it.mode === 'installment') {
+    const v = Object.values(it.schedule || {});
+    if (!v.some((x) => x > 0)) return 'ใส่ยอดผ่อนอย่างน้อย 1 เดือน';
+    if (v.some((x) => !Number.isSafeInteger(x) || x < 0)) return 'ยอดผ่อนไม่ถูกต้อง';
+  } else return 'ประเภทไม่ถูกต้อง';
+  return null;
+}
+
+/** Status of each recurring item for `month`: amount, due, paid tx (if any), warn state relative to `today`. */
+export function recurringStatus(items, txs, month, today, warnDays = 3) {
+  return items.map((it) => {
+    const amount = recurringAmount(it, month);
+    const due = dueDate(it, month);
+    const paidTx = txs.find((t) => t.recurringId === it.id && t.recurringMonth === month) || null;
+    const daysLeft = Math.round((Date.parse(due) - Date.parse(today)) / 864e5);
+    const state = !amount ? 'none' : paidTx ? 'paid' : daysLeft < 0 ? 'overdue' : daysLeft <= warnDays ? 'soon' : 'upcoming';
+    return { item: it, amount, due, paidTx, daysLeft, state };
+  }).filter((r) => r.amount > 0 || r.paidTx);
+}
+
+/** Auto-pay: transactions to create for items with autoPay whose due date ≤ today and not yet paid (from startMonth to today's month). */
+export function autoPayDue(items, txs, today) {
+  const out = [], cur = monthKey(today);
+  for (const it of items) {
+    if (!it.autoPay) continue;
+    for (let m = it.startMonth; m <= cur; m = shiftMonth(m, 1)) {
+      const amount = recurringAmount(it, m), due = dueDate(it, m);
+      if (!amount || due > today) continue;
+      if (txs.some((t) => t.recurringId === it.id && t.recurringMonth === m)) continue;
+      out.push({ kind: 'out', amount, date: due, categoryId: it.categoryId, note: it.name, source: 'auto', recurringId: it.id, recurringMonth: m });
+    }
+  }
+  return out;
+}
+
+// ---- CP10 income plan
+// plans: [{ month, salary|null, other }] ; salary copies forward; links: { salaryCatId, otCatId }
+export function effectiveSalary(plans, month) {
+  let best = null;
+  for (const p of plans) if (p.month <= month && p.salary != null && (!best || p.month > best.month)) best = p;
+  return best ? best.salary : 0;
+}
+export function incomePlan({ month, plans, links = {}, txs, items, hours, settings = DEFAULT_SETTINGS, holidays = [] }) {
+  const salary = effectiveSalary(plans, month);
+  const other = plans.find((p) => p.month === month)?.other || 0;
+  const ot = otPay(month, hours, settings, holidays);
+  const planTotal = salary + ot.total + other;
+  const inc = txs.filter((t) => t.kind === 'in' && monthKey(t.date) === month);
+  const sum = (f) => inc.filter(f).reduce((a, t) => a + t.amount, 0);
+  const actSalary = links.salaryCatId ? sum((t) => t.categoryId === links.salaryCatId) : 0;
+  const actOt = links.otCatId ? sum((t) => t.categoryId === links.otCatId) : 0;
+  const actTotal = sum(() => true);
+  const fixedTotal = items.reduce((a, it) => a + recurringAmount(it, month), 0);
+  return {
+    month, payDate: payDate(month, settings), salary, other, ot, planTotal, fixedTotal,
+    remaining: planTotal - fixedTotal,
+    actual: { salary: actSalary, ot: actOt, other: actTotal - actSalary - actOt, total: actTotal },
+    toCome: Math.max(0, planTotal - actTotal),
+  };
+}

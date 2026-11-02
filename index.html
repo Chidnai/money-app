@@ -22,6 +22,7 @@
 <main>
 <!-- HOME -->
 <section data-v="home" class="view">
+  <div id="home-due"></div>
   <div class="summary">
     <div class="lbl">คงเหลือเดือนนี้ (รายรับ − รายจ่าย)</div>
     <div class="big num" id="s-bal">฿ 0</div>
@@ -96,13 +97,86 @@
   <div class="err" id="c-err"></div>
 </section>
 
-<!-- MORE -->
+<!-- MORE: plan / OT / recurring / settings (ชุด 3) -->
 <section data-v="more" class="view" hidden>
-  <div class="soon"><b>แผนรายรับล่วงหน้า</b><span>CP10</span></div>
-  <div class="soon"><b>ปฏิทิน OT</b><span>CP11</span></div>
-  <div class="soon"><b>รายจ่ายคงที่ · ตารางผ่อน</b><span>CP8–9</span></div>
-  <div class="soon"><b>สำรอง / กู้คืนข้อมูล</b><span>CP12</span></div>
-  <p class="muted" id="persist" style="margin:0"></p>
+  <div class="seg" id="subtabs" style="grid-template-columns:repeat(4,1fr)">
+    <button type="button" class="on" data-t="plan">แผน</button><button type="button" data-t="ot">OT</button><button type="button" data-t="fix">ประจำ</button><button type="button" data-t="set">ตั้งค่า</button>
+  </div>
+
+  <div data-sub="plan" style="display:grid;gap:16px">
+    <div class="summary" id="pl-sum"></div>
+    <div class="panel" style="display:grid;gap:8px" id="pl-lines"></div>
+    <div class="panel" style="display:grid;gap:8px"><h2>แผนล่วงหน้า</h2><div id="pl-ahead" style="overflow-x:auto"></div></div>
+  </div>
+
+  <div data-sub="ot" hidden style="display:grid;gap:12px">
+    <div class="panel" style="display:grid;gap:6px" id="ot-sum"></div>
+    <div class="legend"><span class="pill" style="--c:var(--fg);--cb:var(--line)">วันปกติ</span><span class="pill" style="--c:var(--alert);--cb:var(--alert-bg)">เสาร์-อาทิตย์</span><span class="pill" style="--c:var(--over);--cb:var(--over-bg)">วันหยุดบริษัท</span></div>
+    <div id="ot-cal" style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px"></div>
+    <form id="ot-edit" class="panel" hidden style="display:grid;gap:8px" novalidate>
+      <b id="ot-day"></b>
+      <label for="ot-h">ชั่วโมง OT<input id="ot-h" class="num" inputmode="decimal" autocomplete="off"></label>
+      <div class="row" style="gap:8px"><button class="btn small" type="submit">บันทึก</button><button class="btn small ghost" type="button" id="ot-hol"></button><button class="btn small ghost" type="button" id="ot-close">ปิด</button></div>
+      <div class="err" id="ot-err"></div>
+    </form>
+    <p class="muted" style="margin:0">แตะวันที่เพื่อใส่ชั่วโมง หรือตั้งเป็นวันหยุดบริษัท · ใช้ได้ทั้งแผนและชั่วโมงจริง (แก้ทีหลังได้)</p>
+  </div>
+
+  <div data-sub="fix" hidden style="display:grid;gap:12px">
+    <div id="fx-warn"></div>
+    <div class="panel" style="padding-block:4px" id="fx-list"></div>
+    <button class="btn ghost" type="button" id="fx-new">+ เพิ่มรายจ่ายประจำ / ผ่อน</button>
+    <form id="fx-form" class="panel" hidden style="display:grid;gap:10px" novalidate>
+      <h2 id="fx-title">เพิ่มรายจ่ายประจำ</h2>
+      <label for="fx-name">ชื่อ<input id="fx-name" maxlength="40" autocomplete="off"></label>
+      <label for="fx-cat">หมวดรายจ่าย (นับเข้างบ)<select id="fx-cat"></select></label>
+      <div class="row" style="gap:8px"><label for="fx-day" style="flex:1">ครบกำหนดทุกวันที่<input id="fx-day" class="num" inputmode="numeric"></label>
+        <label for="fx-start" style="flex:1">เริ่มเดือน<input id="fx-start" type="month"></label></div>
+      <div class="seg" id="fx-mode"><button type="button" class="on" data-m="fixed">คงที่ (ยอดเท่ากัน)</button><button type="button" data-m="installment">ผ่อน (ยอดรายเดือน)</button></div>
+      <label for="fx-amt" id="fx-amtbox">จำนวนเงินต่อเดือน<input id="fx-amt" class="num" inputmode="decimal"></label>
+      <div id="fx-sched" hidden style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px"></div>
+      <label style="display:flex;gap:8px;align-items:center;color:var(--fg)"><input type="checkbox" id="fx-auto" style="width:auto"> หักอัตโนมัติเมื่อถึงวันครบกำหนด</label>
+      <div class="err" id="fx-err"></div>
+      <button class="btn" type="submit">บันทึก</button>
+      <div class="row" style="gap:8px"><button class="btn ghost" type="button" id="fx-cancel">ยกเลิก</button><button class="btn ghost" type="button" id="fx-del" style="color:var(--over);border-color:var(--over)">ลบ</button><button class="btn danger" type="button" id="fx-delok" hidden>ยืนยันลบ</button></div>
+    </form>
+  </div>
+
+  <div data-sub="set" hidden style="display:grid;gap:16px">
+    <form id="st-form" class="panel" style="display:grid;gap:10px" novalidate>
+      <h2>ตั้งค่า OT และวันเงินออก</h2>
+      <label for="st-rate">อัตราฐาน (บาท/ชม.)<input id="st-rate" class="num" inputmode="decimal"></label>
+      <div class="row" style="gap:8px"><label for="st-wd" style="flex:1">วันปกติ ×<input id="st-wd" class="num" inputmode="decimal"></label><label for="st-h1" style="flex:1">วันหยุด ชม.แรก ×<input id="st-h1" class="num" inputmode="decimal"></label></div>
+      <div class="row" style="gap:8px"><label for="st-hh" style="flex:1">จำนวน ชม.แรกของวันหยุด<input id="st-hh" class="num" inputmode="decimal"></label><label for="st-h2" style="flex:1">หลังจากนั้น ×<input id="st-h2" class="num" inputmode="decimal"></label></div>
+      <div class="row" style="gap:8px"><label for="st-cs" style="flex:1">รอบตัดเริ่มวันที่<input id="st-cs" class="num" inputmode="numeric"></label><label for="st-pd" style="flex:1">เงินออกวันที่<input id="st-pd" class="num" inputmode="numeric"></label></div>
+      <label for="st-warn">เตือนรายจ่ายประจำล่วงหน้า (วัน)<input id="st-warn" class="num" inputmode="numeric"></label>
+      <p class="muted" style="margin:0">ถ้าวันเงินออกตรงเสาร์/อาทิตย์ → วันศุกร์ก่อนหน้า</p>
+      <div class="err" id="st-err"></div>
+      <button class="btn" type="submit">บันทึกตั้งค่า</button>
+    </form>
+    <div class="panel" style="display:grid;gap:8px">
+      <h2>ผูกหมวดรายรับกับแผน</h2>
+      <label for="st-sal">เงินเดือน = หมวด<select id="st-sal"></select></label>
+      <label for="st-ot">OT = หมวด<select id="st-ot"></select></label>
+    </div>
+    <div class="panel" style="display:grid;gap:6px">
+      <h2>วันหยุดบริษัท</h2>
+      <div id="st-hols" style="display:grid;gap:6px"></div>
+      <form class="row" style="gap:8px" id="st-holform" novalidate><input type="date" id="st-hol" style="flex:1;min-width:0" aria-label="วันหยุดใหม่"><button class="btn small" type="submit">เพิ่ม</button></form>
+    </div>
+  <div class="panel" style="display:grid;gap:10px">
+    <h2>สำรอง / กู้คืนข้อมูล</h2>
+    <div class="debt"><span>สำรองล่าสุด</span><b id="bk-last">ยังไม่เคย</b></div>
+    <div class="debt muted"><span>ข้อมูลในเครื่อง</span><span id="bk-count"></span></div>
+    <button class="btn" type="button" id="bk-save">สำรองข้อมูลเป็นไฟล์</button>
+    <p class="muted" style="margin:0">ไฟล์ไปอยู่ในโฟลเดอร์ Download ของมือถือ ไม่ถูกส่งไปที่ไหน · ควรย้ายไปเก็บอีกที่ (LINE Keep / Drive) · ไฟล์ไม่ได้เข้ารหัส</p>
+    <label class="btn ghost" for="bk-file" style="text-align:center">กู้คืนจากไฟล์…</label>
+    <input type="file" id="bk-file" accept=".json,application/json" hidden>
+    <div id="bk-confirm" hidden style="display:grid;gap:8px;border-top:1px solid var(--line);padding-top:10px"></div>
+    <div class="err" id="bk-err"></div>
+  </div>
+    <p class="muted" id="persist" style="margin:0"></p>
+  </div>
 </section>
 </main>
 
