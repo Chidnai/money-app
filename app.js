@@ -159,9 +159,9 @@ async function renderFix() {
     let right = '<span class="muted">ไม่มียอดเดือนนี้</span>';
     if (r) {
       const tag = r.state === 'paid' ? `<span class="tag" style="color:var(--ok);border-color:var(--ok)">${r.paidTx.source === 'auto' ? 'หักอัตโนมัติแล้ว' : 'จ่ายแล้ว'}</span>`
-        : r.state === 'overdue' ? `<button class="icon-btn" data-pay="${it.id}" style="color:var(--over);border-color:var(--over)">เลยกำหนด · จ่ายแล้ว</button>`
-        : r.state === 'soon' ? `<button class="icon-btn" data-pay="${it.id}" style="color:var(--alert);border-color:var(--alert)">จ่ายแล้ว</button>`
-        : `<button class="icon-btn" data-pay="${it.id}">จ่ายแล้ว</button>`;
+        : r.state === 'overdue' ? `<button class="icon-btn" data-pay="${it.id}" style="color:var(--over);border-color:var(--over)">เลยกำหนด · รอจ่าย</button>`
+        : r.state === 'soon' ? `<button class="icon-btn" data-pay="${it.id}" style="color:var(--alert);border-color:var(--alert)">รอจ่าย</button>`
+        : `<button class="icon-btn" data-pay="${it.id}">รอจ่าย</button>`;
       right = `<div class="num">${formatBaht(r.amount)}</div>${tag}`;
     }
     return `<div class="cat"><button type="button" class="ic" data-edit="${it.id}" style="border:0;cursor:pointer" aria-label="แก้ไข ${esc(it.name)}">${it.dueDay}</button>
