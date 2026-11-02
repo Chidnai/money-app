@@ -116,6 +116,12 @@
 <div class="toast" id="toast" hidden></div>
 </div>
 <!--/APP-->
+<script>
+window.addEventListener('error', function (e) {
+  var m = document.querySelector('main'); if (!m || document.getElementById('boot-err')) return;
+  m.insertAdjacentHTML('afterbegin', '<div id="boot-err" class="panel" style="border-color:var(--over);color:var(--over)">แอพโหลดไม่ครบ ปิดแล้วเปิดแอพใหม่อีกครั้ง (ต้องต่อเน็ต) · ' + String(e.message || '').slice(0, 120) + '</div>');
+});
+</script>
 <script type="module" src="app.js"></script>
 </body>
 </html>
