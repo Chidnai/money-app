@@ -181,8 +181,9 @@ export function budgetStatus({ categories, budgets, txs, moves, month }) {
       const cIn = carry.get(c.id) || 0;
       const avail = budget + cIn + movedIn - movedOut, left = avail - used;
       carry.set(c.id, left);
-      const pct = avail > 0 ? Math.floor((used / avail) * 100) : (left < 0 ? 100 : 0);
-      return { categoryId: c.id, name: c.name, budget, carry: cIn, movedIn, movedOut, used, avail, left, pct, tier: tierOf(pct) };
+      const ratio = avail > 0 ? (used / avail) * 100 : (left < 0 ? 100 : 0);
+      const pct = Math.floor(ratio * 10) / 10; // 1 decimal, never rounds up into the next tier
+      return { categoryId: c.id, name: c.name, budget, carry: cIn, movedIn, movedOut, used, avail, left, pct, tier: tierOf(ratio) };
     });
     if (cur >= month) break;
     cur = shiftMonth(cur, 1);

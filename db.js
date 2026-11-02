@@ -6,7 +6,7 @@ export const DB_VERSION = 2;
 
 const req = (r) => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
 
-export function openDB(idb = globalThis.indexedDB, name = DB_NAME) {
+export function openDB(idb = globalThis.indexedDB, name = DB_NAME, onBlocked = null) {
   return new Promise((res, rej) => {
     const r = idb.open(name, DB_VERSION);
     r.onupgradeneeded = () => {
@@ -25,7 +25,13 @@ export function openDB(idb = globalThis.indexedDB, name = DB_NAME) {
         s.createIndex('date', 'date');
       }
     };
-    r.onsuccess = () => res(r.result);
+    r.onblocked = () => onBlocked?.();
+    r.onsuccess = () => {
+      const db = r.result;
+      // release this connection when a newer app version needs to upgrade the database
+      db.onversionchange = () => { db.close(); if (typeof location !== 'undefined') location.reload(); };
+      res(db);
+    };
     r.onerror = () => rej(r.error);
   });
 }
@@ -123,4 +129,34 @@ export class Repo {
     await req(this.store('moves', 'readwrite').delete(id));
   }
   async listAllTransactions() { return this.listTransactions(); }
+
+  // ---- convert between รายการ (tx) and ยืม-คืน (move), atomically
+  async convertTxToMove(oldTx, input) {
+    const [cats, moves] = await Promise.all([this.listCategories(), this.listMoves()]);
+    const mv = { id: newId(), type: input.type, fromId: input.fromId, toId: input.toId, amount: input.amount, date: input.date,
+      note: String(input.note ?? '').trim(), source: oldTx.source || 'manual', createdAt: oldTx.createdAt || Date.now(), updatedAt: Date.now() };
+    const err = validateMove(mv, cats, moves);
+    if (err) throw new Error(err);
+    await this.swap('transactions', oldTx.id, 'moves', mv);
+    return mv;
+  }
+  async convertMoveToTx(oldMv, input) {
+    const [cats, moves] = await Promise.all([this.listCategories(), this.listMoves()]);
+    const block = canDeleteMove(moves, oldMv.id);
+    if (block) throw new Error(block);
+    const tx = { id: newId(), kind: input.kind, amount: input.amount, date: input.date, categoryId: input.categoryId,
+      note: String(input.note ?? '').trim(), source: oldMv.source || 'manual', createdAt: oldMv.createdAt || Date.now(), updatedAt: Date.now() };
+    const err = validateTransaction(tx, cats);
+    if (err) throw new Error(err);
+    await this.swap('moves', oldMv.id, 'transactions', tx);
+    return tx;
+  }
+  swap(delStore, delId, putStore, rec) {
+    return new Promise((res, rej) => {
+      const t = this.db.transaction([delStore, putStore], 'readwrite');
+      t.objectStore(delStore).delete(delId);
+      t.objectStore(putStore).put(rec);
+      t.oncomplete = () => res(); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error);
+    });
+  }
 }

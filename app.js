@@ -2,7 +2,7 @@
 import { openDB, Repo } from './db.js';
 import {
   parseAmount, formatBaht, monthKey, shiftMonth, todayISO, monthLabel, dayLabel, summarize, groupByDate,
-  budgetStatus, outstandingDebts, monthlySeries, effectiveBudget, TIER_LABEL, MOVE_LABEL,
+  budgetStatus, outstandingDebts, monthlySeries, effectiveBudget, pairNet, TIER_LABEL, MOVE_LABEL,
 } from './logic.js';
 
 const $ = (id) => document.getElementById(id);
@@ -61,7 +61,7 @@ async function renderHome() {
     if (b.carry) parts.push(`ทบ ${sign(b.carry)}`);
     const net = b.movedIn - b.movedOut;
     if (net) parts.push(`${net > 0 ? 'รับยืม/ย้ายมา' : 'ให้ยืม/ย้ายออก'} ${sign(net)}`);
-    return `<div class="bud t-${b.tier}"><div class="row"><span class="name">${esc(b.name)}</span><span class="pill">${b.pct}% · ${TIER_LABEL[b.tier]}</span></div>
+    return `<div class="bud t-${b.tier}"><div class="row"><span class="name">${esc(b.name)}</span><span class="pill">${b.pct.toFixed(1)}% · ${TIER_LABEL[b.tier]}</span></div>
       <div class="bar"><i style="width:${Math.min(Math.max(b.pct, 0), 100)}%"></i></div>
       <div class="row muted"><span class="num">${formatBaht(b.used)} / ${b.avail < 0 ? '−' : ''}${formatBaht(Math.abs(b.avail))}</span>
         <span class="num" style="color:${b.left < 0 ? 'var(--over)' : 'inherit'}">${b.left < 0 ? 'เกิน' : 'เหลือ'} ${formatBaht(Math.abs(b.left))}</span></div>
@@ -81,7 +81,9 @@ async function renderHome() {
 }
 
 function renderChart(series) {
-  const W = 340, H = 170, base = 140, top = 14, max = Math.max(1, ...series.flatMap((s) => [s.income, s.expense]));
+  const peak = Math.max(0, ...series.flatMap((s) => [s.income, s.expense]));
+  if (!peak) { $('chart').innerHTML = '<span class="muted">ยังไม่มีรายรับ-รายจ่ายใน 6 เดือนนี้</span>'; return; }
+  const W = 340, H = 170, base = 140, top = 14, max = peak;
   const slot = W / series.length, bw = Math.min(18, slot / 2 - 4);
   const h = (v) => Math.round(((base - top) * v) / max);
   const bars = series.map((s, i) => {
@@ -117,7 +119,14 @@ async function renderList() {
     `<optgroup label="${k === 'out' ? 'รายจ่าย' : 'รายรับ'}">` +
     S.cats.filter((c) => c.kind === k).map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('') + '</optgroup>').join('');
   f.value = S.cats.some((c) => c.id === cur) ? cur : '';
-  const [txs0, mv0] = await Promise.all([repo.listTransactions(S.month), repo.listMoves(S.month)]);
+  const [txs0, mv0, allMv] = await Promise.all([repo.listTransactions(S.month), repo.listMoves(S.month), repo.listMoves()]);
+  const debtTag = (t) => {
+    if (t.type === 'shift') return '';
+    const [debtor, creditor] = t.type === 'borrow' ? [t.toId, t.fromId] : [t.fromId, t.toId];
+    const net = pairNet(allMv, debtor, creditor);
+    return net <= 0 ? '<span class="tag" style="color:var(--ok);border-color:var(--ok)">คืนครบแล้ว</span>'
+      : `<span class="tag" style="color:var(--over);border-color:var(--over)">ค้าง ${formatBaht(net)}</span>`;
+  };
   let items = [...txs0.map((t) => ({ ...t, _t: 'tx' })), ...mv0.map((m) => ({ ...m, _t: 'mv' }))];
   if (f.value) items = items.filter((t) => t.categoryId === f.value || t.fromId === f.value || t.toId === f.value);
   const src = (s) => `<span class="tag">${s && s !== 'manual' ? esc(s) : 'กรอกเอง'}</span>`;
@@ -126,7 +135,7 @@ async function renderList() {
       const verb = t.type === 'borrow' ? `ยืม ${esc(catName(t.fromId))}` : t.type === 'repay' ? `คืน ${esc(catName(t.toId))}` : `ย้ายงบ → ${esc(catName(t.toId))}`;
       const who = t.type === 'borrow' ? catName(t.toId) : catName(t.fromId);
       return `<button class="tx" data-mv="${t.id}"><div class="ic">⇄</div>
-        <div class="mid"><div>${esc(who)} ${verb}</div><div class="muted">${MOVE_LABEL[t.type]}${t.note ? ' · ' + esc(t.note) : ''}${src(t.source)}</div></div>
+        <div class="mid"><div>${esc(who)} ${verb}</div><div class="muted">${MOVE_LABEL[t.type]}${t.note ? ' · ' + esc(t.note) : ''}${debtTag(t)}${src(t.source)}</div></div>
         <div class="num" style="font-weight:600;color:var(--muted)">${formatBaht(t.amount)}</div></button>`;
     }
     const name = catName(t.categoryId);
@@ -240,7 +249,6 @@ function bind() {
   // add form
   $('kind').addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b) return;
-    if (S.editing && (S.editing._t === 'mv') !== (b.dataset.k === 'move')) return toast('แก้ไขข้ามประเภทไม่ได้ ให้ลบแล้วเพิ่มใหม่');
     S.kind = b.dataset.k; renderForm();
   });
   $('mtype').addEventListener('click', (e) => { const b = e.target.closest('.chip'); if (!b) return; S.mtype = b.dataset.m; renderForm(); });
@@ -256,8 +264,12 @@ function bind() {
     const base = S.editing || {};
     const common = { amount, date: $('f-date').value, note: $('f-note').value };
     try {
-      if (S.kind === 'move') await repo.saveMove({ ...base, ...common, type: S.mtype, fromId: $('m-from').value, toId: $('m-to').value });
-      else await repo.saveTransaction({ ...base, ...common, kind: S.kind, categoryId: S.catId });
+      const mvIn = { ...common, type: S.mtype, fromId: $('m-from').value, toId: $('m-to').value };
+      const txIn = { ...common, kind: S.kind, categoryId: S.catId };
+      if (S.editing?._t === 'tx' && S.kind === 'move') await repo.convertTxToMove(S.editing, mvIn);
+      else if (S.editing?._t === 'mv' && S.kind !== 'move') await repo.convertMoveToTx(S.editing, txIn);
+      else if (S.kind === 'move') await repo.saveMove({ ...base, ...mvIn });
+      else await repo.saveTransaction({ ...base, ...txIn });
       const wasEdit = !!S.editing, wasMove = S.kind === 'move';
       S.month = monthKey($('f-date').value);
       resetForm();
@@ -317,7 +329,10 @@ function renderCats() {
 
 async function init() {
   try {
-    repo = new Repo(await openDB());
+    const db = await openDB(undefined, undefined, () => {
+      document.querySelector('main').insertAdjacentHTML('afterbegin', '<div class="panel" style="border-color:var(--over);color:var(--over)">มีแอพนี้เปิดค้างอยู่ในแท็บอื่น (เช่น Chrome) — ปิดแท็บนั้นแล้วเปิดแอพใหม่</div>');
+    });
+    repo = new Repo(db);
   } catch (e) {
     document.querySelector('main').innerHTML = `<div class="empty"><b>เปิดที่เก็บข้อมูลบนเครื่องไม่ได้</b><span>${esc(e.message || e)}</span></div>`;
     return;
