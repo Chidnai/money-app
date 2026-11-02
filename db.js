@@ -1,8 +1,8 @@
 // IndexedDB repository. Data stays on this device only.
-import { newId, normalizeName, validateCategory, validateTransaction } from './logic.js';
+import { newId, normalizeName, validateCategory, validateTransaction, validateMove, canDeleteMove } from './logic.js';
 
 export const DB_NAME = 'money-app';
-export const DB_VERSION = 1;
+export const DB_VERSION = 2;
 
 const req = (r) => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
 
@@ -18,6 +18,12 @@ export function openDB(idb = globalThis.indexedDB, name = DB_NAME) {
         s.createIndex('categoryId', 'categoryId');
       }
       if (!d.objectStoreNames.contains('meta')) d.createObjectStore('meta', { keyPath: 'key' });
+      // v2: budgets (key = month|categoryId, amount null = no budget) + moves (borrow/repay/shift)
+      if (!d.objectStoreNames.contains('budgets')) d.createObjectStore('budgets', { keyPath: 'key' }).createIndex('month', 'month');
+      if (!d.objectStoreNames.contains('moves')) {
+        const s = d.createObjectStore('moves', { keyPath: 'id' });
+        s.createIndex('date', 'date');
+      }
     };
     r.onsuccess = () => res(r.result);
     r.onerror = () => rej(r.error);
@@ -56,7 +62,9 @@ export class Repo {
     return req(this.store('transactions').index('categoryId').count(id));
   }
   async deleteCategory(id) {
-    const n = await this.countByCategory(id);
+    const moves = await this.listMoves();
+    const nm = moves.filter((m) => m.fromId === id || m.toId === id).length;
+    const n = (await this.countByCategory(id)) + nm;
     if (n > 0) throw new Error(`หมวดนี้มี ${n} รายการ จึงลบไม่ได้`);
     await req(this.store('categories', 'readwrite').delete(id));
   }
@@ -82,4 +90,37 @@ export class Repo {
     return tx;
   }
   async deleteTransaction(id) { await req(this.store('transactions', 'readwrite').delete(id)); }
+
+  // ---- budgets
+  async listBudgets() { return req(this.store('budgets').getAll()); }
+  async setBudgets(month, entries) {
+    // entries: [{categoryId, amount|null}] — writes explicit records for this month
+    const st = this.store('budgets', 'readwrite');
+    await Promise.all(entries.map((e) => req(st.put({ key: `${month}|${e.categoryId}`, month, categoryId: e.categoryId, amount: e.amount }))));
+  }
+
+  // ---- moves (borrow / repay / shift)
+  async listMoves(month) {
+    const range = month ? IDBKeyRange.bound(`${month}-01`, `${month}-31`) : undefined;
+    return req(this.store('moves').index('date').getAll(range));
+  }
+  async getMove(id) { return req(this.store('moves').get(id)); }
+  async saveMove(input) {
+    const [cats, moves] = await Promise.all([this.listCategories(), this.listMoves()]);
+    const mv = {
+      id: input.id || newId(), type: input.type, fromId: input.fromId, toId: input.toId,
+      amount: input.amount, date: input.date, note: String(input.note ?? '').trim(),
+      source: input.source || 'manual', createdAt: input.createdAt || Date.now(), updatedAt: Date.now(),
+    };
+    const err = validateMove(mv, cats, moves);
+    if (err) throw new Error(err);
+    await req(this.store('moves', 'readwrite').put(mv));
+    return mv;
+  }
+  async deleteMove(id) {
+    const err = canDeleteMove(await this.listMoves(), id);
+    if (err) throw new Error(err);
+    await req(this.store('moves', 'readwrite').delete(id));
+  }
+  async listAllTransactions() { return this.listTransactions(); }
 }

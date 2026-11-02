@@ -29,9 +29,16 @@
       <div>รายรับ<b class="num" id="s-in">0</b></div>
       <div>รายจ่าย<b class="num" id="s-out">0</b></div>
     </div>
+    <div class="extra"><span>การยืม-คืน/ย้ายงบ ไม่นับเป็นรายรับ-รายจ่าย</span></div>
   </div>
-  <div class="soon"><b>งบรายจ่ายแยกหมวด · ยอดทบ · สีเตือน</b><span>จะเปิดใช้ใน CP5</span></div>
-  <div class="soon"><b>ยืมข้ามหมวด · ค้างคืน</b><span>จะเปิดใช้ใน CP6</span></div>
+  <div class="row"><h2>งบรายจ่ายแยกหมวด</h2><button class="icon-btn" id="go-bud" style="color:var(--accent);border-color:var(--accent)">ตั้งงบ</button></div>
+  <div class="budgets" id="budgets"></div>
+  <div class="panel" id="debtbox" style="display:grid;gap:8px"></div>
+  <div class="panel" style="display:grid;gap:10px">
+    <h2>รายรับ vs รายจ่าย 6 เดือน</h2>
+    <div class="legend"><span class="pill" style="--c:var(--ok);--cb:var(--ok-bg)">รายรับ</span><span class="pill" style="--c:var(--accent);--cb:var(--accent-soft)">รายจ่าย</span></div>
+    <div id="chart"></div>
+  </div>
 </section>
 
 <!-- LIST -->
@@ -44,12 +51,18 @@
 <!-- ADD / EDIT -->
 <section data-v="add" class="view" hidden>
   <form class="form" id="txform" novalidate>
-    <div class="seg" id="kind"><button type="button" class="on" data-k="out">รายจ่าย</button><button type="button" data-k="in">รายรับ</button></div>
-    <div class="slip" role="button" tabindex="0" id="slip"><b>อัพโหลดสลิปโอนเงิน</b></div>
+    <div class="seg" id="kind" style="grid-template-columns:repeat(3,1fr)"><button type="button" class="on" data-k="out">รายจ่าย</button><button type="button" data-k="in">รายรับ</button><button type="button" data-k="move">ยืม-คืน</button></div>
+    <div class="slip" role="button" tabindex="0" id="slip"><b>อัพโหลดสลิปโอนเงิน</b><span style="font-size:13px">ไม่บังคับ · ไม่มีสลิปก็กรอกเองได้</span></div>
     <div class="muted" style="text-align:center">หรือกรอกเอง</div>
     <label for="f-amt">จำนวนเงิน (บาท)<input id="f-amt" class="amount-in num" inputmode="decimal" autocomplete="off" placeholder="0.00"></label>
     <label for="f-date">วันที่<input id="f-date" type="date"></label>
-    <div style="display:grid;gap:6px"><span class="muted">หมวดหมู่</span><div class="chips" id="chips"></div></div>
+    <div id="catbox" style="display:grid;gap:6px"><span class="muted">หมวดหมู่</span><div class="chips" id="chips"></div></div>
+    <div id="movebox" class="form" hidden>
+      <div class="chips" id="mtype"><button type="button" class="chip on" data-m="borrow">ยืม</button><button type="button" class="chip" data-m="repay">คืน</button><button type="button" class="chip" data-m="shift">ย้ายงบ (ไม่ต้องคืน)</button></div>
+      <label for="m-from"><span id="l-from"></span><select id="m-from"></select></label>
+      <label for="m-to"><span id="l-to"></span><select id="m-to"></select></label>
+      <p class="muted" id="m-hint" style="margin:0"></p>
+    </div>
     <label for="f-note">หมายเหตุ<input id="f-note" maxlength="200" autocomplete="off"></label>
     <div class="err" id="f-err"></div>
     <button class="btn" type="submit" id="f-save">บันทึก</button>
@@ -58,6 +71,17 @@
       <button class="btn ghost" type="button" id="f-del" style="color:var(--over);border-color:var(--over)">ลบรายการนี้</button>
       <button class="btn danger" type="button" id="f-delok" hidden>ยืนยันลบ</button>
     </div>
+  </form>
+</section>
+
+<!-- BUDGET SETTING -->
+<section data-v="bud" class="view" hidden>
+  <p class="muted" style="margin:0">เดือนใหม่คัดลอกงบจากเดือนก่อนให้อัตโนมัติ แก้ได้ทีละเดือน · เว้นว่าง = ไม่ตั้งงบ</p>
+  <form id="budform" class="form" novalidate>
+    <div class="panel" id="budlist" style="padding-block:4px"></div>
+    <div class="err" id="b-err"></div>
+    <button class="btn" type="submit" id="b-save">บันทึกงบ</button>
+    <button class="btn ghost" type="button" id="b-back">กลับภาพรวม</button>
   </form>
 </section>
 
