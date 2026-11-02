@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#3b3f9e">
+<title>แอพวางแผนการใช้เงิน</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anuphan:wght@500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="app.css">
+<style>:root{padding-top:env(safe-area-inset-top,0px)}body{margin:0}</style>
+</head>
+<body>
+<!--APP-->
+<div class="app">
+<header>
+  <h1 id="ttl">ภาพรวม</h1>
+  <div class="month"><button id="m-prev" aria-label="เดือนก่อน">‹</button><span id="m-label"></span><button id="m-next" aria-label="เดือนถัดไป">›</button></div>
+</header>
+
+<main>
+<!-- HOME -->
+<section data-v="home" class="view">
+  <div class="summary">
+    <div class="lbl">คงเหลือเดือนนี้ (รายรับ − รายจ่าย)</div>
+    <div class="big num" id="s-bal">฿ 0</div>
+    <div class="grid" style="grid-template-columns:repeat(2,1fr)">
+      <div>รายรับ<b class="num" id="s-in">0</b></div>
+      <div>รายจ่าย<b class="num" id="s-out">0</b></div>
+    </div>
+  </div>
+  <div class="soon"><b>งบรายจ่ายแยกหมวด · ยอดทบ · สีเตือน</b><span>จะเปิดใช้ใน CP5</span></div>
+  <div class="soon"><b>ยืมข้ามหมวด · ค้างคืน</b><span>จะเปิดใช้ใน CP6</span></div>
+</section>
+
+<!-- LIST -->
+<section data-v="list" class="view" hidden>
+  <div class="row"><label for="f-filter" style="flex:1">กรองตามหมวด
+    <select id="f-filter"><option value="">ทั้งหมด</option></select></label></div>
+  <div id="txlist" style="display:grid;gap:10px"></div>
+</section>
+
+<!-- ADD / EDIT -->
+<section data-v="add" class="view" hidden>
+  <form class="form" id="txform" novalidate>
+    <div class="seg" id="kind"><button type="button" class="on" data-k="out">รายจ่าย</button><button type="button" data-k="in">รายรับ</button></div>
+    <div class="slip" role="button" tabindex="0" id="slip"><b>อัพโหลดสลิปโอนเงิน</b></div>
+    <div class="muted" style="text-align:center">หรือกรอกเอง</div>
+    <label for="f-amt">จำนวนเงิน (บาท)<input id="f-amt" class="amount-in num" inputmode="decimal" autocomplete="off" placeholder="0.00"></label>
+    <label for="f-date">วันที่<input id="f-date" type="date"></label>
+    <div style="display:grid;gap:6px"><span class="muted">หมวดหมู่</span><div class="chips" id="chips"></div></div>
+    <label for="f-note">หมายเหตุ<input id="f-note" maxlength="200" autocomplete="off"></label>
+    <div class="err" id="f-err"></div>
+    <button class="btn" type="submit" id="f-save">บันทึก</button>
+    <div id="f-editacts" hidden style="display:grid;gap:8px">
+      <button class="btn ghost" type="button" id="f-cancel">ยกเลิกการแก้ไข</button>
+      <button class="btn ghost" type="button" id="f-del" style="color:var(--over);border-color:var(--over)">ลบรายการนี้</button>
+      <button class="btn danger" type="button" id="f-delok" hidden>ยืนยันลบ</button>
+    </div>
+  </form>
+</section>
+
+<!-- CATEGORIES -->
+<section data-v="cat" class="view" hidden>
+  <div class="seg" id="catkind"><button type="button" class="on" data-k="out">หมวดรายจ่าย</button><button type="button" data-k="in">หมวดรายรับ</button></div>
+  <div class="panel" id="catlist" style="padding-block:4px"></div>
+  <form class="row" style="gap:8px" id="catform" novalidate>
+    <input id="f-newcat" placeholder="ชื่อหมวดใหม่" maxlength="40" style="flex:1;min-width:0" autocomplete="off">
+    <button class="btn small" type="submit">เพิ่ม</button>
+  </form>
+  <div class="err" id="c-err"></div>
+</section>
+
+<!-- MORE -->
+<section data-v="more" class="view" hidden>
+  <div class="soon"><b>แผนรายรับล่วงหน้า</b><span>CP10</span></div>
+  <div class="soon"><b>ปฏิทิน OT</b><span>CP11</span></div>
+  <div class="soon"><b>รายจ่ายคงที่ · ตารางผ่อน</b><span>CP8–9</span></div>
+  <div class="soon"><b>สำรอง / กู้คืนข้อมูล</b><span>CP12</span></div>
+  <p class="muted" id="persist" style="margin:0"></p>
+</section>
+</main>
+
+<nav><div class="in">
+  <button data-go="home" class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>ภาพรวม</button>
+  <button data-go="list"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>รายการ</button>
+  <button data-go="add" class="add"><span class="plus">+</span>เพิ่ม</button>
+  <button data-go="cat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>หมวดหมู่</button>
+  <button data-go="more"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>แผน/OT</button>
+</div></nav>
+<div class="toast" id="toast" hidden></div>
+</div>
+<!--/APP-->
+<script type="module" src="app.js"></script>
+</body>
+</html>
