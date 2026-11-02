@@ -90,23 +90,25 @@ async function renderPlan() {
     <div class="big num">฿ ${p.remaining < 0 ? '−' : ''}${formatBaht(Math.abs(p.remaining))}</div>
     <div class="grid"><div>รายรับตามแผน<b class="num">${formatBaht(p.planTotal)}</b></div><div>รายจ่ายประจำ<b class="num">${formatBaht(p.fixedTotal)}</b></div><div>เงินออก<b>${dLabel(p.payDate)}</b></div></div>`;
   const cyc = otCycle(S.month, ctx.settings);
+  const got = (v) => (v > 0 ? `<span style="color:var(--ok)">ได้รับแล้ว ${formatBaht(v)} ✓</span> · ` : '');
   $('pl-lines').innerHTML = `<div class="row"><h2>รายรับ: แผน vs จริง</h2></div>
-    <form class="cat" id="pl-salform" novalidate><div class="mid">เงินเดือน<div class="muted">ใช้ยอดนี้ต่อทุกเดือนจนกว่าจะแก้ · จริง ${formatBaht(p.actual.salary)}</div></div>
+    <form class="cat" id="pl-salform" novalidate><div class="mid">เงินเดือน<div class="muted">${got(p.actual.salary)}ใช้ยอดนี้ต่อทุกเดือนจนกว่าจะแก้</div></div>
       <input id="pl-sal" class="num" inputmode="decimal" value="${p.salary ? p.salary / 100 : ''}" placeholder="0" style="width:110px;text-align:right" aria-label="เงินเดือนตามแผน"></form>
-    <div class="cat"><div class="mid">OT รอบ ${dayLabel(cyc.start)} – ${dayLabel(cyc.end)}<div class="muted">จากปฏิทิน OT (${p.ot.hours} ชม.) · จริง ${formatBaht(p.actual.ot)}</div></div><div class="num">${formatBaht(p.ot.total)}</div></div>
-    <form class="cat" id="pl-othform" novalidate><div class="mid">อื่นๆ<div class="muted">กรอกเอง · จริง ${formatBaht(p.actual.other)}</div></div>
+    <div class="cat"><div class="mid">OT รอบ ${dayLabel(cyc.start)} – ${dayLabel(cyc.end)}<div class="muted">${got(p.actual.ot)}จากปฏิทิน OT ${p.ot.hours} ชม.</div></div><div class="num">${formatBaht(p.ot.total)}</div></div>
+    <form class="cat" id="pl-othform" novalidate><div class="mid">อื่นๆ<div class="muted">${got(p.actual.other)}กรอกเอง</div></div>
       <input id="pl-oth" class="num" inputmode="decimal" value="${p.other ? p.other / 100 : ''}" placeholder="0" style="width:110px;text-align:right" aria-label="รายรับอื่นตามแผน"></form>
-    <div class="debt" style="border-top:1px solid var(--line);padding-top:8px"><span>ได้จริงแล้ว</span><span class="num">${formatBaht(p.actual.total)}</span></div>
-    <div class="debt"><b>ยังจะได้อีก</b><b class="num" style="color:var(--ok)">+${formatBaht(p.toCome)}</b></div>
+    <div class="debt" style="border-top:1px solid var(--line);padding-top:8px"><b>รวมยอดรายรับ</b><b class="num" style="color:var(--ok)">${formatBaht(p.planTotal)}</b></div>
+    ${p.actual.total ? `<div class="debt muted"><span>ได้รับแล้ว (จากรายการรายรับที่บันทึก)</span><span class="num">${formatBaht(p.actual.total)}</span></div>` : ''}
     ${!ctx.links.salaryCatId ? '<p class="muted" style="margin:0">ผูกหมวดรายรับ "เงินเดือน"/"OT" ได้ที่แท็บตั้งค่า เพื่อแยกยอดจริง</p>' : ''}
     <div class="err" id="pl-err"></div>`;
   const months = [0, 1, 2, 3].map((i) => shiftMonth(S.month, i)).map((m) => incomePlan({ month: m, ...ctx }));
   const td = (v, b) => `<td style="text-align:right;padding:4px 6px;white-space:nowrap">${b ? '<b>' : ''}${v}${b ? '</b>' : ''}</td>`;
   const fm = (n) => `${n < 0 ? '−' : ''}${formatBaht(Math.abs(Math.round(n / 100) * 100))}`;
-  $('pl-ahead').innerHTML = `<table class="num" style="border-collapse:collapse;width:100%;font-size:13px">
+  $('pl-ahead').innerHTML = `<table style="border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums">
     <tr class="muted"><td></td>${months.map((x) => td(monthLabel(x.month).split(' ')[0])).join('')}</tr>
-    <tr><td>รายรับ</td>${months.map((x) => td(fm(x.planTotal))).join('')}</tr>
-    <tr><td>ประจำ/ผ่อน</td>${months.map((x) => td(fm(x.fixedTotal))).join('')}</tr>
+    <tr><td>รายรับ</td>${months.map((x) => td(fm(x.salary + x.other))).join('')}</tr>
+    <tr><td>เงิน OT</td>${months.map((x) => td(fm(x.ot.total))).join('')}</tr>
+    <tr><td>รายจ่ายประจำ/ผ่อน</td>${months.map((x) => td(fm(x.fixedTotal))).join('')}</tr>
     <tr><td><b>คงเหลือ</b></td>${months.map((x) => td(fm(x.remaining), true)).join('')}</tr>
     <tr class="muted"><td>เงินออก</td>${months.map((x) => td(`${dowLabel(x.payDate)} ${Number(x.payDate.slice(8))}`)).join('')}</tr></table>
     ${months.slice(1).some((x) => !x.ot.hours) ? '<p class="muted" style="margin:6px 0 0">เดือนที่ยังไม่กรอกปฏิทิน OT จะนับ OT = 0</p>' : ''}`;
