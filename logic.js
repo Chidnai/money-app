@@ -210,7 +210,7 @@ export function monthlySeries(txs, endMonth, n = 6) {
 export const BACKUP_FORMAT = 2;
 const STORES = ['categories', 'transactions', 'budgets', 'moves'];
 export const STORES_V3 = ['recurring', 'otHours', 'plans'];
-export const META_KEYS = ['settings', 'holidays', 'planLinks'];
+export const META_KEYS = ['settings', 'holidays', 'planLinks', 'feat'];
 
 export function backupFileName(now = new Date()) {
   const p = (n) => String(n).padStart(2, '0');

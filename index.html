@@ -20,6 +20,40 @@
 </header>
 
 <main>
+<!-- WIZARD (first run) -->
+<section data-v="wiz" class="view" hidden>
+  <div class="seg" id="wz-dots" style="grid-template-columns:repeat(3,1fr);pointer-events:none"><button type="button" data-s="1">1 หมวด</button><button type="button" data-s="2">2 เงินเดือน</button><button type="button" data-s="3">3 ฟีเจอร์</button></div>
+  <div id="wz1" class="panel" style="display:grid;gap:10px">
+    <h2>สร้างหมวดหมู่ของคุณ</h2>
+    <p class="muted" style="margin:0">ตั้งชื่อเองได้ตามต้องการ ข้ามไปเพิ่มทีหลังได้</p>
+    <div class="seg" id="wz-kind"><button type="button" class="on" data-k="out">หมวดรายจ่าย</button><button type="button" data-k="in">หมวดรายรับ</button></div>
+    <div id="wz-list" class="chips"></div>
+    <form class="row" style="gap:8px" id="wz-form" novalidate><input id="wz-cat" placeholder="ชื่อหมวด" maxlength="40" style="flex:1;min-width:0" autocomplete="off"><button class="btn small" type="submit">เพิ่ม</button></form>
+    <div class="err" id="wz-err1"></div>
+    <button class="btn" type="button" id="wz-n1">ถัดไป</button>
+  </div>
+  <div id="wz2" class="panel" style="display:grid;gap:10px" hidden>
+    <h2>วันเงินออกและ OT</h2>
+    <p class="muted" style="margin:0">ตั้งครั้งเดียว แก้ทีหลังได้ที่ ตั้งค่า · ถ้าไม่ใช้ OT กดข้าม</p>
+    <label for="wz-pd">เงินออกวันที่<input id="wz-pd" class="num" inputmode="numeric"></label>
+    <label for="wz-cs">รอบตัด OT เริ่มวันที่<input id="wz-cs" class="num" inputmode="numeric"></label>
+    <label for="wz-rate">อัตราฐาน (บาท/ชม.)<input id="wz-rate" class="num" inputmode="decimal"></label>
+    <div class="err" id="wz-err2"></div>
+    <button class="btn" type="button" id="wz-n2">ถัดไป</button>
+    <button class="btn ghost" type="button" id="wz-skip">ข้าม (ไม่ใช้ OT)</button>
+    <button class="btn ghost" type="button" id="wz-b2">ย้อนกลับ</button>
+  </div>
+  <div id="wz3" class="panel" style="display:grid;gap:10px" hidden>
+    <h2>เลือกฟีเจอร์ที่ต้องการ</h2>
+    <p class="muted" style="margin:0">เปิด/ปิดทีหลังได้ที่ เพิ่มเติม › ตั้งค่า</p>
+    <label class="row" style="gap:8px;justify-content:flex-start"><input type="checkbox" id="wz-f-plan" style="width:auto"> แผนรายรับ</label>
+    <label class="row" style="gap:8px;justify-content:flex-start"><input type="checkbox" id="wz-f-ot" style="width:auto"> ปฏิทิน OT</label>
+    <label class="row" style="gap:8px;justify-content:flex-start"><input type="checkbox" id="wz-f-fix" style="width:auto"> รายจ่ายประจำ/ผ่อน</label>
+    <button class="btn" type="button" id="wz-done">เริ่มใช้งาน</button>
+    <button class="btn ghost" type="button" id="wz-b3">ย้อนกลับ</button>
+  </div>
+</section>
+
 <!-- HOME -->
 <section data-v="home" class="view">
   <div id="home-due"></div>
@@ -145,6 +179,12 @@
   </div>
 
   <div data-sub="set" hidden style="display:grid;gap:16px">
+    <div class="panel" style="display:grid;gap:8px">
+      <h2>ฟีเจอร์ที่ใช้</h2>
+      <label class="row" style="gap:8px;justify-content:flex-start"><input type="checkbox" id="sf-plan" style="width:auto"> แผนรายรับ</label>
+      <label class="row" style="gap:8px;justify-content:flex-start"><input type="checkbox" id="sf-ot" style="width:auto"> ปฏิทิน OT</label>
+      <label class="row" style="gap:8px;justify-content:flex-start"><input type="checkbox" id="sf-fix" style="width:auto"> รายจ่ายประจำ/ผ่อน</label>
+    </div>
     <form id="st-form" class="panel" style="display:grid;gap:10px" novalidate>
       <h2>ตั้งค่า OT และวันเงินออก</h2>
       <label for="st-rate">อัตราฐาน (บาท/ชม.)<input id="st-rate" class="num" inputmode="decimal"></label>
@@ -187,7 +227,7 @@
   <button data-go="list"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>รายการ</button>
   <button data-go="add" class="add"><span class="plus">+</span>เพิ่ม</button>
   <button data-go="cat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>หมวดหมู่</button>
-  <button data-go="more"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>แผน/OT</button>
+  <button data-go="more"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg><span id="nav-more">แผน/OT</span></button>
 </div></nav>
 <div class="toast" id="toast" hidden></div>
 </div>

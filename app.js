@@ -8,7 +8,7 @@ import {
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const TITLES = { home: 'ภาพรวม', list: 'รายการ', add: 'เพิ่มรายการ', cat: 'หมวดหมู่', more: 'แผน / OT', bud: 'ตั้งงบ' };
+const TITLES = { home: 'ภาพรวม', list: 'รายการ', add: 'เพิ่มรายการ', cat: 'หมวดหมู่', more: 'แผน / OT', bud: 'ตั้งงบ', wiz: 'เริ่มต้นใช้งาน' };
 const TH_SHORT = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
 const MOVE_TEXT = {
   borrow: ['ยืมจากหมวด (ใช้ได้ลดลง)', 'ไปให้หมวด (ใช้ได้เพิ่มขึ้น)', 'ยอดนี้จะค้างคืนจนกว่าจะบันทึกคืน', 'บันทึกการยืม'],
@@ -16,7 +16,7 @@ const MOVE_TEXT = {
   shift: ['ย้ายงบจากหมวด', 'ไปหมวด', 'ย้ายถาวร ไม่เกิดยอดค้างคืน', 'บันทึกการย้ายงบ'],
 };
 
-const S = { sub: 'plan', fxEdit: null, fxMode: 'fixed', otDay: null, recLink: null, month: monthKey(todayISO()), view: 'home', kind: 'out', mtype: 'borrow', catKind: 'out', catId: null, editing: null, renaming: null, confirmDel: null, cats: [] };
+const S = { sub: 'plan', fxEdit: null, fxMode: 'fixed', otDay: null, recLink: null, month: monthKey(todayISO()), view: 'home', kind: 'out', mtype: 'borrow', catKind: 'out', catId: null, editing: null, renaming: null, confirmDel: null, cats: [], feat: { plan: true, ot: true, fix: true }, wz: 1, wzKind: 'out', wzSkipOt: false };
 let repo;
 
 function toast(msg) {
@@ -29,12 +29,16 @@ function go(view) {
   document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('on', b.dataset.go === view));
   document.querySelectorAll('.view').forEach((v) => (v.hidden = v.dataset.v !== view));
   $('ttl').textContent = view === 'add' && S.editing ? 'แก้ไขรายการ' : TITLES[view];
+  document.querySelector('nav').hidden = view === 'wiz';
   window.scrollTo(0, 0);
   render();
 }
 
 async function render() {
   S.cats = await repo.listCategories();
+  S.feat = { plan: true, ot: true, fix: true, ...((await repo.getMeta('feat')) || {}) };
+  $('nav-more').textContent = S.feat.plan || S.feat.ot || S.feat.fix ? 'แผน/OT' : 'เพิ่มเติม';
+  TITLES.more = $('nav-more').textContent === 'เพิ่มเติม' ? 'เพิ่มเติม' : 'แผน / OT';
   $('m-label').textContent = monthLabel(S.month);
   if (S.view === 'home') return renderHome();
   if (S.view === 'list') return renderList();
@@ -42,6 +46,7 @@ async function render() {
   if (S.view === 'cat') return renderCats();
   if (S.view === 'bud') return renderBudgetForm();
   if (S.view === 'more') return renderMore();
+  if (S.view === 'wiz') return renderWiz();
 }
 
 // ---------- ชุด 3 helpers
@@ -62,6 +67,10 @@ async function renderDue(el, compact) {
 }
 
 async function renderMore() {
+  const tabs = [...document.querySelectorAll('#subtabs button')];
+  tabs.forEach((b) => (b.hidden = b.dataset.t !== 'set' && S.feat[b.dataset.t] === false));
+  $('subtabs').style.gridTemplateColumns = `repeat(${tabs.filter((b) => !b.hidden).length},1fr)`;
+  if (S.feat[S.sub] === false) S.sub = 'set';
   document.querySelectorAll('#subtabs button').forEach((b) => b.classList.toggle('on', b.dataset.t === S.sub));
   document.querySelectorAll('[data-sub]').forEach((d) => (d.hidden = d.dataset.sub !== S.sub));
   $('ttl').textContent = { plan: 'แผนรายรับ', ot: 'ปฏิทิน OT', fix: 'รายจ่ายประจำ', set: 'ตั้งค่า' }[S.sub];
@@ -207,6 +216,7 @@ async function renderSettings() {
   $('st-sal').value = links.salaryCatId || ''; $('st-ot').value = links.otCatId || '';
   $('st-hols').innerHTML = hols.length ? hols.map((d) => `<div class="debt"><span>${dLabel(d)}</span><button class="icon-btn" type="button" data-unhol="${d}">ลบ</button></div>`).join('') : '<span class="muted">ยังไม่มีวันหยุด</span>';
   $('st-err').textContent = '';
+  for (const k of ['plan', 'ot', 'fix']) $('sf-' + k).checked = S.feat[k] !== false;
 }
 
 // ---------- CP4 slip OCR (on-device; image is not stored)
@@ -662,6 +672,51 @@ function renderCats() {
   if (S.renaming) $('f-rename')?.focus();
 }
 
+// ---------- first-run wizard
+async function needSetup() {
+  if (await repo.getMeta('setupDone')) return false;
+  const [c, t] = await Promise.all([repo.listCategories(), repo.listTransactions()]);
+  return !c.length && !t.length;
+}
+async function renderWiz() {
+  document.querySelectorAll('#wz-dots button').forEach((b) => b.classList.toggle('on', +b.dataset.s === S.wz));
+  [1, 2, 3].forEach((n) => ($('wz' + n).hidden = n !== S.wz));
+  document.querySelectorAll('#wz-kind button').forEach((b) => b.classList.toggle('on', b.dataset.k === S.wzKind));
+  const mine = S.cats.filter((c) => c.kind === S.wzKind);
+  $('wz-list').innerHTML = mine.length ? mine.map((c) => `<span class="chip on">${esc(c.name)}</span>`).join('') : '<span class="muted">ยังไม่มี</span>';
+  if (S.wz === 2 && !$('wz-pd').value) { const st = await repo.getSettings(); $('wz-pd').value = st.payDay; $('wz-cs').value = st.cycleStart; $('wz-rate').value = st.baseRate / 100; }
+  if (S.wz === 3 && !$('wz-done').dataset.init) { $('wz-done').dataset.init = '1'; $('wz-f-plan').checked = false; $('wz-f-fix').checked = false; $('wz-f-ot').checked = !S.wzSkipOt; }
+}
+function wzStep(n) { S.wz = n; renderWiz(); window.scrollTo(0, 0); }
+function bindWiz() {
+  $('wz-kind').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; S.wzKind = b.dataset.k; renderWiz(); });
+  $('wz-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try { await repo.addCategory(S.wzKind, $('wz-cat').value); $('wz-cat').value = ''; $('wz-err1').textContent = ''; S.cats = await repo.listCategories(); renderWiz(); }
+    catch (err) { $('wz-err1').textContent = err.message; }
+  });
+  $('wz-n1').onclick = () => wzStep(2);
+  $('wz-b2').onclick = () => wzStep(1);
+  $('wz-b3').onclick = () => wzStep(2);
+  $('wz-skip').onclick = () => { S.wzSkipOt = true; $('wz-done').dataset.init = ''; wzStep(3); };
+  $('wz-n2').onclick = async () => {
+    try {
+      const st = await repo.getSettings();
+      await repo.saveSettings({ ...st, baseRate: bahtIn($('wz-rate').value) ?? 0, cycleStart: numIn($('wz-cs').value), payDay: numIn($('wz-pd').value) });
+      S.wzSkipOt = false; $('wz-done').dataset.init = ''; $('wz-err2').textContent = ''; wzStep(3);
+    } catch (err) { $('wz-err2').textContent = err.message; }
+  };
+  $('wz-done').onclick = async () => {
+    await repo.setMeta('feat', { plan: $('wz-f-plan').checked, ot: $('wz-f-ot').checked, fix: $('wz-f-fix').checked });
+    await repo.setMeta('setupDone', true);
+    S.sub = 'plan'; go('home');
+  };
+  for (const k of ['plan', 'ot', 'fix']) $('sf-' + k).onchange = async () => {
+    await repo.setMeta('feat', { plan: $('sf-plan').checked, ot: $('sf-ot').checked, fix: $('sf-fix').checked });
+    toast('บันทึกแล้ว'); render();
+  };
+}
+
 async function init() {
   try {
     const db = await openDB(undefined, undefined, () => {
@@ -676,7 +731,8 @@ async function init() {
     const ok = await navigator.storage?.persist?.();
     $('persist').textContent = ok ? 'ข้อมูลถูกเก็บแบบถาวรบนเครื่องนี้' : 'ระบบยังไม่อนุญาตเก็บข้อมูลแบบถาวร — ติดตั้งแอพลงหน้าจอเพื่อลดความเสี่ยงข้อมูลหาย';
   } catch { /* optional */ }
-  resetForm(); bind(); render();
+  resetForm(); bind(); bindWiz();
+  if (await needSetup()) { S.wz = 1; go('wiz'); } else render();
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 init();
