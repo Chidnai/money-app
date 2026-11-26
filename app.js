@@ -334,12 +334,18 @@ async function renderHome() {
       <button class="icon-btn" data-repay="${d.debtorId}|${d.creditorId}|${d.amount}">คืน</button></span></div>`).join('')
       : '<span class="muted">ไม่มียอดค้าง</span>');
 
-  renderChart(monthlySeries(allTx, S.month));
+  const cs = { n: 6, start: null, ...((await repo.getMeta('chart')) || {}) };
+  const first = cs.start || shiftMonth(S.month, -(cs.n - 1));
+  $('ch-n').value = String(cs.n); $('ch-start').value = first; $('ch-reset').disabled = !cs.start;
+  const series = monthlySeries(allTx, shiftMonth(first, cs.n - 1), cs.n);
+  const lbl = (m) => { const [y, mm] = m.split('-').map(Number); return `${TH_SHORT[mm - 1]} ${String(y + 543).slice(-2)}`; };
+  $('ch-range').textContent = `${lbl(series[0].month)} – ${lbl(series[series.length - 1].month)}`;
+  renderChart(series);
 }
 
 function renderChart(series) {
   const peak = Math.max(0, ...series.flatMap((s) => [s.income, s.expense]));
-  if (!peak) { $('chart').innerHTML = '<span class="muted">ยังไม่มีรายรับ-รายจ่ายใน 6 เดือนนี้</span>'; return; }
+  if (!peak) { $('chart').innerHTML = '<span class="muted">ยังไม่มีรายรับ-รายจ่ายในช่วงนี้</span>'; return; }
   const W = 340, H = 170, base = 140, top = 14, max = peak;
   const slot = W / series.length, bw = Math.min(18, slot / 2 - 4);
   const h = (v) => Math.round(((base - top) * v) / max);
@@ -351,7 +357,7 @@ function renderChart(series) {
       <text x="${x}" y="${base + 16}" text-anchor="middle" font-size="11" fill="var(--muted)" font-weight="${s.month === S.month ? 700 : 400}">${TH_SHORT[m - 1]}</text>`;
   }).join('');
   const maxLbl = `<text x="0" y="${top - 3}" font-size="10" fill="var(--muted)">สูงสุด ${formatBaht(max)}</text>`;
-  $('chart').innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="กราฟรายรับรายจ่าย 6 เดือน" style="width:100%">
+  $('chart').innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="กราฟรายรับรายจ่าย ${series.length} เดือน" style="width:100%">
     <line x1="0" y1="${top}" x2="${W}" y2="${top}" stroke="var(--line)" stroke-dasharray="3 3"/>
     <line x1="0" y1="${base}" x2="${W}" y2="${base}" stroke="var(--line)"/>${maxLbl}${bars}</svg>`;
 }
@@ -688,6 +694,12 @@ async function renderWiz() {
   if (S.wz === 3 && !$('wz-done').dataset.init) { $('wz-done').dataset.init = '1'; $('wz-f-plan').checked = false; $('wz-f-fix').checked = false; $('wz-f-ot').checked = !S.wzSkipOt; }
 }
 function wzStep(n) { S.wz = n; renderWiz(); window.scrollTo(0, 0); }
+function bindChart() {
+  const save = async (patch) => { await repo.setMeta('chart', { n: 6, start: null, ...((await repo.getMeta('chart')) || {}), ...patch }); renderHome(); };
+  $('ch-n').onchange = () => save({ n: Number($('ch-n').value) });
+  $('ch-start').onchange = () => { const v = $('ch-start').value; if (/^\d{4}-\d{2}$/.test(v)) save({ start: v }); };
+  $('ch-reset').onclick = () => save({ start: null });
+}
 function bindWiz() {
   $('wz-kind').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; S.wzKind = b.dataset.k; renderWiz(); });
   $('wz-form').addEventListener('submit', async (e) => {
@@ -731,7 +743,7 @@ async function init() {
     const ok = await navigator.storage?.persist?.();
     $('persist').textContent = ok ? 'ข้อมูลถูกเก็บแบบถาวรบนเครื่องนี้' : 'ระบบยังไม่อนุญาตเก็บข้อมูลแบบถาวร — ติดตั้งแอพลงหน้าจอเพื่อลดความเสี่ยงข้อมูลหาย';
   } catch { /* optional */ }
-  resetForm(); bind(); bindWiz();
+  resetForm(); bind(); bindWiz(); bindChart();
   if (await needSetup()) { S.wz = 1; go('wiz'); } else render();
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 }
