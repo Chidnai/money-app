@@ -302,6 +302,15 @@ const catName = (id) => S.cats.find((c) => c.id === id)?.name ?? '—';
 const sign = (n) => (n > 0 ? '+' : n < 0 ? '−' : '') + formatBaht(Math.abs(n));
 
 // ---------- HOME (CP5–CP7)
+async function startPay(id) {
+  const it = (await repo.listRecurring()).find((x) => x.id === id);
+  if (!it) return;
+  resetForm();
+  S.kind = 'out'; S.catId = it.categoryId; S.recLink = { recurringId: it.id, recurringMonth: S.month };
+  $('f-amt').value = recurringAmount(it, S.month) / 100; $('f-note').value = it.name;
+  $('f-date').value = todayISO();
+  go('add'); toast(`เติมข้อมูล "${it.name}" ให้แล้ว แนบสลิปได้ แล้วกดบันทึก`);
+}
 async function renderHomePlan() {
   const hp = $('home-plan');
   hp.hidden = true;
@@ -313,15 +322,21 @@ async function renderHomePlan() {
   const paid = rows.filter((r) => r.state === 'paid'), left = rows.filter((r) => r.state !== 'paid');
   const sum = (a) => a.reduce((x, r) => x + r.amount, 0);
   const mname = monthLabel(S.month).split(' ')[0];
+  const byDue = [...left].sort((a, b) => a.due.localeCompare(b.due));
+  const listHtml = byDue.slice(0, 5).map((r) => `<div class="debt"><span>${esc(r.item.name)}<div class="muted" style="font-size:12px">${r.state === 'overdue' ? '<span style="color:var(--over)">เลยกำหนด · </span>' : ''}จ่าย ${dLabel(r.due)}</span></div></span>
+      <span style="display:flex;gap:8px;align-items:center"><span class="num">${formatBaht(r.amount)}</span><button class="icon-btn" type="button" data-pay="${r.item.id}">รอจ่าย</button></span></div>`).join('')
+    + (byDue.length > 5 ? `<div class="muted" style="font-size:12px">และอีก ${byDue.length - 5} รายการ — กด "ดูรายการ"</div>` : '');
   hp.hidden = false;
   hp.innerHTML = `<div class="row"><h2>บิล/ผ่อนรอบ ${mname}</h2><button class="icon-btn" type="button" id="hp-go">ดูรายการ</button></div>
     <div class="muted" style="font-size:12px">จ่ายจริง ${dayLabel(p.cycle.start)} – ${dayLabel(p.cycle.end)}</div>
     <div class="row"><span>จ่ายแล้ว ${paid.length} จาก ${rows.length} รายการ</span><span class="num" style="color:${left.length ? 'var(--over)' : 'var(--ok)'};font-weight:700">${left.length ? 'ค้างจ่าย ' + formatBaht(sum(left)) : 'จ่ายครบแล้ว ✓'}</span></div>
-    <div class="bar"><i style="width:${Math.round((paid.length / rows.length) * 100)}%"></i></div>
+    <div class="bar" style="--c:var(--ok)"><i style="width:${Math.round((paid.length / rows.length) * 100)}%"></i></div>
+    ${listHtml}
     <div class="row" style="align-items:baseline;border-top:1px solid var(--line);padding-top:8px"><span class="muted">เหลือใช้ได้ (รายรับตามแผน − บิลทั้งรอบ)</span><b class="num" style="font-size:20px;color:${p.remaining < 0 ? 'var(--over)' : 'inherit'}">฿ ${p.remaining < 0 ? '−' : ''}${formatBaht(Math.abs(p.remaining))}</b></div>
     ${p.planTotal ? '' : '<div class="muted" style="font-size:12px">ยังไม่ได้ใส่เงินเดือนตามแผน — ใส่ได้ที่ แผน/OT › แผน</div>'}`;
   $('hp-go').onclick = () => { S.sub = 'fix'; go('more'); };
 }
+
 async function renderHome() {
   renderHomePlan();
   await renderDue($('home-due'), true);
@@ -332,6 +347,8 @@ async function renderHome() {
   $('s-out').textContent = formatBaht(s.expense);
 
   const st = budgetStatus({ categories: S.cats, budgets, txs: allTx, moves, month: S.month });
+  const hot = st.filter((b) => b.budget !== null && b.pct >= 80).length;
+  $('bud-flag').innerHTML = hot ? `<span style="color:var(--alert);font-weight:700">ใกล้เกิน/เกิน ${hot} หมวด</span>` : '';
   $('budgets').innerHTML = st.length ? st.map((b) => {
     if (b.budget === null) return `<div class="bud" style="--c:var(--line)"><div class="row"><span class="name">${esc(b.name)}</span><span class="muted">ไม่ได้ตั้งงบ</span></div>
       <div class="row muted"><span class="num">ใช้ไป ${formatBaht(b.used)}</span></div></div>`;
@@ -606,13 +623,7 @@ function bind() {
   $('fx-new').onclick = () => openFxForm(null);
   $('fx-list').addEventListener('click', async (e) => {
     const ed = e.target.closest('[data-edit]'); if (ed) return openFxForm(ed.dataset.edit);
-    const pay = e.target.closest('[data-pay]'); if (!pay) return;
-    const it = (await repo.listRecurring()).find((x) => x.id === pay.dataset.pay);
-    resetForm();
-    S.kind = 'out'; S.catId = it.categoryId; S.recLink = { recurringId: it.id, recurringMonth: S.month };
-    $('f-amt').value = recurringAmount(it, S.month) / 100; $('f-note').value = it.name;
-    $('f-date').value = todayISO();
-    go('add'); toast(`เติมข้อมูล "${it.name}" ให้แล้ว แนบสลิปได้ แล้วกดบันทึก`);
+    const pay = e.target.closest('[data-pay]'); if (pay) startPay(pay.dataset.pay);
   });
   $('fx-mode').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) setFxMode(b.dataset.m); });
   $('fx-start').addEventListener('change', () => { $('fx-sched').innerHTML = ''; schedInputs(S.fxEdit); });
@@ -716,6 +727,7 @@ async function renderWiz() {
 }
 function wzStep(n) { S.wz = n; renderWiz(); window.scrollTo(0, 0); }
 function bindChart() {
+  $('home-plan').addEventListener('click', (e) => { const pay = e.target.closest('[data-pay]'); if (pay) startPay(pay.dataset.pay); });
   const save = async (patch) => { await repo.setMeta('chart', { n: 6, start: null, ...((await repo.getMeta('chart')) || {}), ...patch }); renderHome(); };
   $('ch-n').onchange = () => save({ n: Number($('ch-n').value) });
   $('ch-start').onchange = () => { const v = $('ch-start').value; if (/^\d{4}-\d{2}$/.test(v)) save({ start: v }); };

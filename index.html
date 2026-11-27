@@ -67,8 +67,13 @@
     </div>
     <div class="extra"><span>การยืม-คืน/ย้ายงบ ไม่นับเป็นรายรับ-รายจ่าย</span></div>
   </div>
-  <div class="row"><h2>งบรายจ่ายแยกหมวด</h2><button class="icon-btn" id="go-bud" style="color:var(--accent);border-color:var(--accent)">ตั้งงบ</button></div>
-  <div class="budgets" id="budgets"></div>
+  <details class="panel" id="bud-det">
+    <summary class="row" style="cursor:pointer;list-style:none"><h2>งบรายจ่ายแยกหมวด ▾</h2><span id="bud-flag" class="muted"></span></summary>
+    <div style="display:grid;gap:10px;margin-top:10px">
+      <div class="row"><span class="muted" style="font-size:12px">เตือนเมื่อใช้ถึง 80% ของงบ</span><button class="icon-btn" id="go-bud" style="color:var(--accent);border-color:var(--accent)">ตั้งงบ</button></div>
+      <div class="budgets" id="budgets"></div>
+    </div>
+  </details>
   <div class="panel" id="debtbox" style="display:grid;gap:8px"></div>
   <div class="panel" style="display:grid;gap:10px">
     <h2>รายรับ vs รายจ่าย</h2>
