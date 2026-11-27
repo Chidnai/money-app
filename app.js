@@ -302,7 +302,28 @@ const catName = (id) => S.cats.find((c) => c.id === id)?.name ?? '—';
 const sign = (n) => (n > 0 ? '+' : n < 0 ? '−' : '') + formatBaht(Math.abs(n));
 
 // ---------- HOME (CP5–CP7)
+async function renderHomePlan() {
+  const hp = $('home-plan');
+  hp.hidden = true;
+  if (!(S.feat.plan && S.feat.fix)) return;
+  const ctx = await planCtx();
+  const rows = recurringStatus(ctx.items, ctx.txs, S.month, todayISO(), ctx.settings.dueWarnDays, ctx.settings);
+  if (!rows.length) return;
+  const p = incomePlan({ month: S.month, ...ctx });
+  const paid = rows.filter((r) => r.state === 'paid'), left = rows.filter((r) => r.state !== 'paid');
+  const sum = (a) => a.reduce((x, r) => x + r.amount, 0);
+  const mname = monthLabel(S.month).split(' ')[0];
+  hp.hidden = false;
+  hp.innerHTML = `<div class="row"><h2>บิล/ผ่อนรอบ ${mname}</h2><button class="icon-btn" type="button" id="hp-go">ดูรายการ</button></div>
+    <div class="muted" style="font-size:12px">จ่ายจริง ${dayLabel(p.cycle.start)} – ${dayLabel(p.cycle.end)}</div>
+    <div class="row"><span>จ่ายแล้ว ${paid.length} จาก ${rows.length} รายการ</span><span class="num" style="color:${left.length ? 'var(--over)' : 'var(--ok)'};font-weight:700">${left.length ? 'ค้างจ่าย ' + formatBaht(sum(left)) : 'จ่ายครบแล้ว ✓'}</span></div>
+    <div class="bar"><i style="width:${Math.round((paid.length / rows.length) * 100)}%"></i></div>
+    <div class="row" style="align-items:baseline;border-top:1px solid var(--line);padding-top:8px"><span class="muted">เหลือใช้ได้ (รายรับตามแผน − บิลทั้งรอบ)</span><b class="num" style="font-size:20px;color:${p.remaining < 0 ? 'var(--over)' : 'inherit'}">฿ ${p.remaining < 0 ? '−' : ''}${formatBaht(Math.abs(p.remaining))}</b></div>
+    ${p.planTotal ? '' : '<div class="muted" style="font-size:12px">ยังไม่ได้ใส่เงินเดือนตามแผน — ใส่ได้ที่ แผน/OT › แผน</div>'}`;
+  $('hp-go').onclick = () => { S.sub = 'fix'; go('more'); };
+}
 async function renderHome() {
+  renderHomePlan();
   await renderDue($('home-due'), true);
   const [allTx, budgets, moves] = await Promise.all([repo.listTransactions(), repo.listBudgets(), repo.listMoves()]);
   const s = summarize(allTx.filter((t) => monthKey(t.date) === S.month));
